@@ -163,7 +163,7 @@ function calculateReports(data) {
 }
 
 // --- UI Components ---
-function SectionCard(props: any) {
+function SectionCard({ title, icon, children, right }: any) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border p-4 md:p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
@@ -178,7 +178,7 @@ function SectionCard(props: any) {
   );
 }
 
-function TextInput(props: any) {
+function TextInput({ label, value, onChange, type = "text", placeholder, className = "", listId }: any) {
   return (
     <label className={`flex flex-col gap-1 ${className}`}>
       <span className="text-sm text-gray-600">{label}</span>
@@ -194,11 +194,11 @@ function TextInput(props: any) {
   );
 }
 
-function Datalist(props: any) {
+function Datalist({ id, options }: any) {
   return (
     <datalist id={id}>
-      {options.map((o) => (
-        <option key={o} value={o} />
+      {options?.map((o: any) => (
+        <option key={String(o)} value={String(o)} />
       ))}
     </datalist>
   );
@@ -208,7 +208,7 @@ function NumberInput(props: any) {
   return <TextInput {...props} type="number" />;
 }
 
-function Select(props: any) {
+function Select({ label, value, onChange, options, className = "" }: any) {
   return (
     <label className={`flex flex-col gap-1 ${className}`}>
       <span className="text-sm text-gray-600">{label}</span>
@@ -218,7 +218,7 @@ function Select(props: any) {
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">Seçin…</option>
-        {options.map((o) => (
+        {options?.map((o: any) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
@@ -226,21 +226,21 @@ function Select(props: any) {
   );
 }
 
-function Table(props: any) {
+function Table({ columns, rows, footer }: any) {
   return (
     <div className="overflow-auto rounded-xl border">
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 text-gray-700">
           <tr>
-            {columns.map((c) => (
+            {columns.map((c: any) => (
               <th key={c.key} className="text-left px-3 py-2 whitespace-nowrap">{c.header}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {rows.map((r: any) => (
             <tr key={r.id || r.key} className="border-t">
-              {columns.map((c) => (
+              {columns.map((c: any) => (
                 <td key={c.key} className="px-3 py-2 whitespace-nowrap">{c.render ? c.render(r) : r[c.key]}</td>
               ))}
             </tr>
@@ -258,8 +258,8 @@ function Table(props: any) {
   );
 }
 
-function Toolbar(props: any) {
-  const fileRef = React.useRef(null);
+function Toolbar({ onExport, onImport, onReset }: any) {
+  const fileRef = React.useRef<HTMLInputElement | null>(null);
   return (
     <div className="flex gap-2 flex-wrap">
       <button
@@ -282,7 +282,7 @@ function Toolbar(props: any) {
         const reader = new FileReader();
         reader.onload = () => {
           try { onImport(JSON.parse(String(reader.result))); }
-          catch (err) { alert("İdxal xətası: " + err.message); }
+          catch (err: any) { alert("İdxal xətası: " + err.message); }
         };
         reader.readAsText(f);
       }} />
@@ -298,7 +298,7 @@ function Toolbar(props: any) {
 }
 
 // --- Forms ---
-function PurchasesForm(props: any) {
+function PurchasesForm({ data, setData }: any) {
   const [date, setDate] = useState(todayISO());
   const [qty, setQty] = useState(0);
   const [unitPrice, setUnitPrice] = useState(0);
@@ -354,7 +354,7 @@ function PurchasesForm(props: any) {
   );
 }
 
-function SalesForm(props: any) {
+function SalesForm({ data, setData, customers }: any) {
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
   const [customer, setCustomer] = useState("");
@@ -418,7 +418,7 @@ function SalesForm(props: any) {
   );
 }
 
-function ExpensesForm(props: any) {
+function ExpensesForm({ data, setData }: any) {
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
   const [name, setName] = useState("");
@@ -458,7 +458,7 @@ function ExpensesForm(props: any) {
   );
 }
 
-function PaymentsForm(props: any) {
+function PaymentsForm({ data, setData, customers }: any) {
   const [date, setDate] = useState(todayISO());
   const [customer, setCustomer] = useState("");
   const [amount, setAmount] = useState(0);
@@ -495,7 +495,7 @@ function PaymentsForm(props: any) {
   );
 }
 
-function Reports(props: any) {
+function Reports({ data }: any) {
   const { perBatch, customerDebts, totals } = useMemo(() => calculateReports(data), [data]);
 
   const batchCols = [
@@ -560,7 +560,7 @@ function Reports(props: any) {
   );
 }
 
-function KPI(props: any) {
+function KPI({ title, value, positive = false }: any) {
   return (
     <div className="rounded-2xl border p-4 min-w-[190px]">
       <div className="text-sm text-gray-600 break-words">{title}</div>
@@ -653,7 +653,7 @@ export default function ECENApp() {
   );
 }
 
-function Tab(props: any) {
+function Tab({ id, active, setActive, icon, label }: any) {
   const isActive = active === id;
   return (
     <button
