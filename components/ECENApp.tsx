@@ -4,13 +4,13 @@ import { motion } from "framer-motion";
 import { Download, Upload, Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers } from "lucide-react";
 
 // --- Simple helpers ---
-const fmt = (n) => (isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-");
-const parseNum = (v) => {
+const fmt = (n: number) => (isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-");
+const parseNum = (v: unknown) => {
   const n = Number(String(v).replace(/,/g, "."));
   return isFinite(n) ? n : 0;
 };
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const todayISO = (): string => new Date().toISOString().slice(0, 10);
+const uid = (): string => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 // --- Storage ---
 const STORAGE_KEY = "ECEN_DATA_V2"; // bumped version after schema/UI changes
@@ -163,7 +163,7 @@ function calculateReports(data) {
 }
 
 // --- UI Components ---
-function SectionCard({ title, icon, children, right }) {
+function SectionCard(props: any) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border p-4 md:p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
@@ -178,7 +178,7 @@ function SectionCard({ title, icon, children, right }) {
   );
 }
 
-function TextInput({ label, value, onChange, type = "text", placeholder, className = "", listId }) {
+function TextInput(props: any) {
   return (
     <label className={`flex flex-col gap-1 ${className}`}>
       <span className="text-sm text-gray-600">{label}</span>
@@ -194,7 +194,7 @@ function TextInput({ label, value, onChange, type = "text", placeholder, classNa
   );
 }
 
-function Datalist({ id, options }) {
+function Datalist(props: any) {
   return (
     <datalist id={id}>
       {options.map((o) => (
@@ -204,11 +204,11 @@ function Datalist({ id, options }) {
   );
 }
 
-function NumberInput(props) {
+function NumberInput(props: any) {
   return <TextInput {...props} type="number" />;
 }
 
-function Select({ label, value, onChange, options, className = "" }) {
+function Select(props: any) {
   return (
     <label className={`flex flex-col gap-1 ${className}`}>
       <span className="text-sm text-gray-600">{label}</span>
@@ -226,7 +226,7 @@ function Select({ label, value, onChange, options, className = "" }) {
   );
 }
 
-function Table({ columns, rows, footer }) {
+function Table(props: any) {
   return (
     <div className="overflow-auto rounded-xl border">
       <table className="min-w-full text-sm">
@@ -258,7 +258,7 @@ function Table({ columns, rows, footer }) {
   );
 }
 
-function Toolbar({ onExport, onImport, onReset }) {
+function Toolbar(props: any) {
   const fileRef = React.useRef(null);
   return (
     <div className="flex gap-2 flex-wrap">
@@ -298,7 +298,7 @@ function Toolbar({ onExport, onImport, onReset }) {
 }
 
 // --- Forms ---
-function PurchasesForm({ data, setData }) {
+function PurchasesForm(props: any) {
   const [date, setDate] = useState(todayISO());
   const [qty, setQty] = useState(0);
   const [unitPrice, setUnitPrice] = useState(0);
@@ -354,7 +354,7 @@ function PurchasesForm({ data, setData }) {
   );
 }
 
-function SalesForm({ data, setData, customers }) {
+function SalesForm(props: any) {
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
   const [customer, setCustomer] = useState("");
@@ -418,7 +418,7 @@ function SalesForm({ data, setData, customers }) {
   );
 }
 
-function ExpensesForm({ data, setData }) {
+function ExpensesForm(props: any) {
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
   const [name, setName] = useState("");
@@ -458,7 +458,7 @@ function ExpensesForm({ data, setData }) {
   );
 }
 
-function PaymentsForm({ data, setData, customers }) {
+function PaymentsForm(props: any) {
   const [date, setDate] = useState(todayISO());
   const [customer, setCustomer] = useState("");
   const [amount, setAmount] = useState(0);
@@ -495,7 +495,7 @@ function PaymentsForm({ data, setData, customers }) {
   );
 }
 
-function Reports({ data }) {
+function Reports(props: any) {
   const { perBatch, customerDebts, totals } = useMemo(() => calculateReports(data), [data]);
 
   const batchCols = [
@@ -560,7 +560,7 @@ function Reports({ data }) {
   );
 }
 
-function KPI({ title, value, positive=false }) {
+function KPI(props: any) {
   return (
     <div className="rounded-2xl border p-4 min-w-[190px]">
       <div className="text-sm text-gray-600 break-words">{title}</div>
@@ -653,7 +653,7 @@ export default function ECENApp() {
   );
 }
 
-function Tab({ id, active, setActive, icon, label }) {
+function Tab(props: any) {
   const isActive = active === id;
   return (
     <button
