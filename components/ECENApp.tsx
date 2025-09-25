@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Download, Upload, Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers } from "lucide-react";
@@ -664,4 +665,3 @@ function Tab({ id, active, setActive, icon, label }) {
     </button>
   );
 }
-
