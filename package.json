@@ -10,7 +10,10 @@
   "dependencies": {
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "next": "15.5.4"
+    "next": "15.5.4",
+    "lucide-react": "^0.453.0",
+    "framer-motion": "^11.0.0"
+
   },
   "devDependencies": {
     "typescript": "^5",
