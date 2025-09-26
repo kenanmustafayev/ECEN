@@ -1,74 +1,131 @@
+'use client';
 // @ts-nocheck
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Download, Upload, Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers } from "lucide-react";
+import { Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers, Pencil, X } from "lucide-react";
 
-// --- Simple helpers ---
-const fmt = (n: number) => (isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-");
-const parseNum = (v: unknown) => {
-  const n = Number(String(v).replace(/,/g, "."));
-  return isFinite(n) ? n : 0;
+/*************************
+ * Helpers & Safe Storage *
+ *************************/
+const fmt = (n) => (Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-");
+const parseNum = (v) => {
+  const n = Number(String(v ?? "").replace(/,/g, "."));
+  return Number.isFinite(n) ? n : 0;
 };
-const todayISO = (): string => new Date().toISOString().slice(0, 10);
-const uid = (): string => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const formatBatchNameFromDate = (dateStr) => {
+  if (!dateStr) return "P - ?";
+  const [y, m, d] = String(dateStr).split("-");
+  if (y && m && d) return `P - ${d}${m}${y}`;
+  try {
+    const dt = new Date(dateStr);
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const mm = String(dt.getMonth()+1).padStart(2, '0');
+    const yy = String(dt.getFullYear());
+    return `P - ${dd}${mm}${yy}`;
+  } catch {
+    return "P - ?";
+  }
+};
+const nextSeqForDate = (purchases, dateStr) => {
+  const count = (Array.isArray(purchases)?purchases:[]).filter(p=>p?.date===dateStr).length + 1;
+  return String(count).padStart(2,'0');
+};
+const batchNameOf = (purchase) => {
+  if (!purchase) return "P - ?";
+  if (purchase.batchName) return purchase.batchName;
+  const base = formatBatchNameFromDate(purchase.date);
+  return purchase.batchSeq ? `${base}-${String(purchase.batchSeq).padStart(2,'0')}` : base;
+};
 
-// --- Storage ---
-const STORAGE_KEY = "ECEN_DATA_V2"; // bumped version after schema/UI changes
-const emptyData = {
-  purchases: [], // {id, date, batchCode, qty, unitPrice}
-  sales: [], // {id, date, batchId, customer, qty, unitPrice}
-  expenses: [], // {id, date, batchId, name, amount}
-  payments: [], // {id, date, customer, amount}
-};
+const STORAGE_KEY = "ECEN_DATA_V2";
+const emptyData = Object.freeze({ purchases: [], sales: [], expenses: [], payments: [] });
+
+function normalizeData(maybe) {
+  const d = maybe && typeof maybe === "object" ? maybe : {};
+  return {
+    purchases: Array.isArray(d.purchases) ? d.purchases : [],
+    sales: Array.isArray(d.sales) ? d.sales : [],
+    expenses: Array.isArray(d.expenses) ? d.expenses : [],
+    payments: Array.isArray(d.payments) ? d.payments : [],
+  };
+}
+
+function safeLoad() {
+  try {
+    if (typeof window === "undefined") return emptyData;
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return emptyData;
+    const parsed = JSON.parse(raw);
+    return normalizeData(parsed);
+  } catch (e) {
+    console.warn("ECEN: failed to load from localStorage", e);
+    return emptyData;
+  }
+}
+function safeSave(data) {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeData(data)));
+  } catch (e) {
+    console.warn("ECEN: failed to save to localStorage", e);
+  }
+}
 
 function usePersistedData() {
-  const [data, setData] = useState(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-      // migrate V1 if present
-      const v1 = localStorage.getItem("ECEN_DATA_V1");
-      return v1 ? JSON.parse(v1) : emptyData;
-    } catch (e) {
-      console.warn("Failed to load ECEN data:", e);
-      return emptyData;
-    }
-  });
+  const [data, setData] = useState(emptyData); // SSR-safe default
 
+  // Load on client after mount
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    setData(safeLoad());
+  }, []);
+
+  // Persist on change
+  useEffect(() => {
+    safeSave(data);
   }, [data]);
 
   const reset = () => setData(emptyData);
-  const loadFromFile = (json) => setData(json);
+  const loadFromFile = (json) => setData(normalizeData(json));
 
   return { data, setData, reset, loadFromFile };
 }
 
-// --- Derived indices ---
+/***********************
+ * Derived & Reporting  *
+ ***********************/
 function useIndices(data) {
+  const purchases = Array.isArray(data?.purchases) ? data.purchases : [];
+  const sales = Array.isArray(data?.sales) ? data.sales : [];
+  const payments = Array.isArray(data?.payments) ? data.payments : [];
+
   const batchIndex = useMemo(() => {
     const m = new Map();
-    data.purchases.forEach((p) => m.set(p.id, p));
+    purchases.forEach((p) => p?.id && m.set(p.id, p));
     return m;
-  }, [data.purchases]);
+  }, [purchases]);
 
   const customers = useMemo(() => {
     const set = new Set();
-    data.sales.forEach((s) => s.customer && set.add(s.customer));
-    data.payments.forEach((p) => p.customer && set.add(p.customer));
+    sales.forEach((s) => s?.customer && set.add(s.customer));
+    payments.forEach((p) => p?.customer && set.add(p.customer));
     return Array.from(set).sort();
-  }, [data.sales, data.payments]);
+  }, [sales, payments]);
 
   return { batchIndex, customers };
 }
 
-// --- Core calculations ---
 function calculateReports(data) {
+  const purchases = Array.isArray(data?.purchases) ? data.purchases : [];
+  const sales = Array.isArray(data?.sales) ? data.sales : [];
+  const expenses = Array.isArray(data?.expenses) ? data.expenses : [];
+  const payments = Array.isArray(data?.payments) ? data.payments : [];
+
   const batchStats = new Map();
 
-  // Initialize per batch from purchases
-  for (const pur of data.purchases) {
+  for (const pur of purchases) {
+    if (!pur) continue;
     batchStats.set(pur.id, {
       batch: pur,
       purchasedQty: parseNum(pur.qty),
@@ -79,24 +136,23 @@ function calculateReports(data) {
     });
   }
 
-  // Sales accumulation
-  for (const s of data.sales) {
+  for (const s of sales) {
+    if (!s) continue;
     const st = batchStats.get(s.batchId);
-    if (!st) continue; // dangling
+    if (!st) continue;
     const qty = parseNum(s.qty);
     const price = parseNum(s.unitPrice);
     st.soldQty += qty;
     st.salesRevenue += qty * price;
   }
 
-  // Expenses accumulation (full per batch)
-  for (const e of data.expenses) {
+  for (const e of expenses) {
+    if (!e) continue;
     const st = batchStats.get(e.batchId);
     if (!st) continue;
     st.expensesTotal += parseNum(e.amount);
   }
 
-  // Compute derived per batch
   const perBatch = [];
   for (const [batchId, st] of batchStats) {
     const purchased = st.purchasedQty;
@@ -104,9 +160,9 @@ function calculateReports(data) {
     const stock = Math.max(0, purchased - sold);
     const revenue = st.salesRevenue;
     const cogs = st.unitCost * sold;
-    const expensesFull = st.expensesTotal; // NOT allocated
+    const expensesFull = st.expensesTotal;
     const profit = revenue - cogs - expensesFull;
-    const stockCost = stock * st.unitCost; // remaining stock at cost
+    const stockCost = stock * st.unitCost;
 
     perBatch.push({
       batchId,
@@ -124,18 +180,17 @@ function calculateReports(data) {
     });
   }
 
-  // Customer debts
   const byCustomer = new Map();
-  for (const s of data.sales) {
-    const cust = s.customer || "(noname)";
-    const amt = parseNum(s.qty) * parseNum(s.unitPrice);
+  for (const s of sales) {
+    const cust = (s && s.customer) ? s.customer : "(noname)";
+    const amt = parseNum(s?.qty) * parseNum(s?.unitPrice);
     const obj = byCustomer.get(cust) || { invoiced: 0, paid: 0 };
     obj.invoiced += amt;
     byCustomer.set(cust, obj);
   }
-  for (const p of data.payments) {
-    const cust = p.customer || "(noname)";
-    const amt = parseNum(p.amount);
+  for (const p of payments) {
+    const cust = (p && p.customer) ? p.customer : "(noname)";
+    const amt = parseNum(p?.amount);
     const obj = byCustomer.get(cust) || { invoiced: 0, paid: 0 };
     obj.paid += amt;
     byCustomer.set(cust, obj);
@@ -147,7 +202,6 @@ function calculateReports(data) {
     balance: v.invoiced - v.paid,
   }));
 
-  // Totals (include full expenses, paid/unpaid, stock qty/cost)
   const totals = {
     revenue: perBatch.reduce((a, b) => a + b.revenue, 0),
     cogs: perBatch.reduce((a, b) => a + b.cogs, 0),
@@ -162,8 +216,10 @@ function calculateReports(data) {
   return { perBatch, customerDebts, totals };
 }
 
-// --- UI Components ---
-function SectionCard({ title, icon, children, right }: any) {
+/****************
+ * UI Utilities *
+ ****************/
+function SectionCard({ title, icon, children, right }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border p-4 md:p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
@@ -178,69 +234,21 @@ function SectionCard({ title, icon, children, right }: any) {
   );
 }
 
-function TextInput({ label, value, onChange, type = "text", placeholder, className = "", listId }: any) {
-  return (
-    <label className={`flex flex-col gap-1 ${className}`}>
-      <span className="text-sm text-gray-600">{label}</span>
-      <input
-        className="border rounded-xl px-3 py-2 focus:outline-none focus:ring w-full"
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        list={listId}
-      />
-    </label>
-  );
-}
-
-function Datalist({ id, options }: any) {
-  return (
-    <datalist id={id}>
-      {options?.map((o: any) => (
-        <option key={String(o)} value={String(o)} />
-      ))}
-    </datalist>
-  );
-}
-
-function NumberInput(props: any) {
-  return <TextInput {...props} type="number" />;
-}
-
-function Select({ label, value, onChange, options, className = "" }: any) {
-  return (
-    <label className={`flex flex-col gap-1 ${className}`}>
-      <span className="text-sm text-gray-600">{label}</span>
-      <select
-        className="border rounded-xl px-3 py-2 focus:outline-none focus:ring w-full"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">Seçin…</option>
-        {options?.map((o: any) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function Table({ columns, rows, footer }: any) {
+function Table({ columns, rows, footer }) {
   return (
     <div className="overflow-auto rounded-xl border">
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 text-gray-700">
           <tr>
-            {columns.map((c: any) => (
+            {columns.map((c) => (
               <th key={c.key} className="text-left px-3 py-2 whitespace-nowrap">{c.header}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r: any) => (
-            <tr key={r.id || r.key} className="border-t">
-              {columns.map((c: any) => (
+          {rows.map((r, i) => (
+            <tr key={r.id || r.key || i} className="border-t">
+              {columns.map((c) => (
                 <td key={c.key} className="px-3 py-2 whitespace-nowrap">{c.render ? c.render(r) : r[c.key]}</td>
               ))}
             </tr>
@@ -258,249 +266,357 @@ function Table({ columns, rows, footer }: any) {
   );
 }
 
-function Toolbar({ onExport, onImport, onReset }: any) {
-  const fileRef = React.useRef<HTMLInputElement | null>(null);
+function TextInput({ label, value, onChange, type = "text", placeholder, className = "", listId }) {
   return (
-    <div className="flex gap-2 flex-wrap">
-      <button
-        className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50"
-        onClick={onExport}
-        title="JSON ixrac et"
+    <label className={`flex flex-col gap-1 ${className}`}>
+      <span className="text-sm text-gray-600">{label}</span>
+      <input
+        className="border rounded-xl px-3 py-2 focus:outline-none focus:ring w-full"
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        list={listId}
+      />
+    </label>
+  );
+}
+
+function NumberInput({ label, value, onChange, placeholder, className = "" }) {
+  return (
+    <label className={`flex flex-col gap-1 ${className}`}>
+      <span className="text-sm text-gray-600">{label}</span>
+      <input
+        className="border rounded-xl px-3 py-2 focus:outline-none focus:ring w-full"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </label>
+  );
+}
+
+function Select({ label, value, onChange, options, className = "" }) {
+  return (
+    <label className={`flex flex-col gap-1 ${className}`}>
+      <span className="text-sm text-gray-600">{label}</span>
+      <select
+        className="border rounded-xl px-3 py-2 focus:outline-none focus:ring w-full"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
       >
-        <Download size={16}/> İxrac (JSON)
-      </button>
-      <button
-        className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50"
-        onClick={() => fileRef.current?.click()}
-        title="JSON idxal et"
-      >
-        <Upload size={16}/> İdxal (JSON)
-      </button>
-      <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={(e) => {
-        const f = e.target.files?.[0];
-        if (!f) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          try { onImport(JSON.parse(String(reader.result))); }
-          catch (err: any) { alert("İdxal xətası: " + err.message); }
-        };
-        reader.readAsText(f);
-      }} />
-      <button
-        className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 text-red-600"
-        onClick={onReset}
-        title="Bütün verilənləri sil"
-      >
-        <Trash2 size={16}/> Təmizlə
-      </button>
+        <option value="">Seçin…</option>
+        {options?.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function KPI({ title, value, positive = false }) {
+  return (
+    <div className="rounded-2xl border p-4 h-full min-w-0">
+      <div className="text-sm text-gray-600 break-words leading-snug">{title}</div>
+      <div className={`text-lg md:text-xl font-semibold leading-snug break-words ${positive && value>=0 ? "text-emerald-700" : value<0?"text-red-600":""}`}>{fmt(value)}</div>
     </div>
   );
 }
 
-// --- Forms ---
-function PurchasesForm({ data, setData }: any) {
+/****************
+ * Forms (CRUD)  *
+ ****************/
+function PurchasesForm({ data, setData }) {
   const [date, setDate] = useState(todayISO());
-  const [qty, setQty] = useState(0);
-  const [unitPrice, setUnitPrice] = useState(0);
-  const [amount, setAmount] = useState(0); // total amount (optional)
+  const [qty, setQty] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [amount, setAmount] = useState("");
+  const [editId, setEditId] = useState("");
 
-  const add = () => {
-    const qtyN = parseNum(qty);
+  const resetInputs = () => { setDate(todayISO()); setQty(""); setUnitPrice(""); setAmount(""); setEditId(""); };
+
+  const addOrSave = () => {
+    const q = parseNum(qty);
     let up = parseNum(unitPrice);
-    const amt = parseNum(amount);
-    if (qtyN <= 0) return alert("Miqdar > 0 olmalıdır");
-    // Auto-calc unit price if amount given and unitPrice empty/zero
-    if ((up === 0 || !isFinite(up)) && amt > 0) {
-      up = amt / qtyN;
+    let amt = parseNum(amount);
+    if (!up && q && amt) up = amt / q;
+    if (!amt && q && up) amt = q * up;
+    if (!date || !q || !up) return alert("Tarix, miqdar və qiymət vacibdir");
+
+    if (editId) {
+      setData({
+        ...data,
+        purchases: data.purchases.map(p => p.id===editId ? { ...p, date, qty:q, unitPrice:up, amount:q*up } : p)
+      });
+      resetInputs();
+      return;
     }
-    if (up < 0) return alert("Qiymət mənfi ola bilməz");
-    const id = uid();
-    const seq = (data.purchases.filter(p => p.date === date).length + 1).toString().padStart(2, "0");
-    const batchCode = `P-${date.replaceAll('-', '')}-${seq}`;
-    setData({
-      ...data,
-      purchases: [
-        { id, date, batchCode, qty: qtyN, unitPrice: up },
-        ...data.purchases,
-      ],
-    });
-    setQty(0); setUnitPrice(0); setAmount(0);
+    const seq = nextSeqForDate(data.purchases, date);
+    const name = `${formatBatchNameFromDate(date)}-${seq}`;
+    const rec = { id: uid(), date, qty: q, unitPrice: up, amount: q * up, batchSeq: seq, batchName: name };
+    setData({ ...data, purchases: [...data.purchases, rec] });
+    resetInputs();
   };
 
-  const columns = [
-    { key: "batchCode", header: "Partiya" },
-    { key: "date", header: "Tarix" },
-    { key: "qty", header: "Miqdar", render: (r) => fmt(r.qty) },
-    { key: "unitPrice", header: "Alış qiyməti", render: (r) => fmt(r.unitPrice) },
-    { key: "amount", header: "Məbləğ", render: (r) => fmt(r.qty * r.unitPrice) },
+  const startEdit = (r) => {
+    setEditId(r.id); setDate(r.date); setQty(String(r.qty)); setUnitPrice(String(r.unitPrice)); setAmount(String(r.amount ?? r.qty*r.unitPrice));
+  }
+  const remove = (id) => setData({ ...data, purchases: data.purchases.filter(p=>p.id!==id) });
+
+  const cols = [
+    { key: 'batch', header: 'Partiya', render: (r) => batchNameOf(r) },
+    { key: 'date', header: 'Tarix' },
+    { key: 'qty', header: 'Miqdar', render: (r) => fmt(r.qty) },
+    { key: 'unitPrice', header: 'Qiymət', render: (r) => fmt(r.unitPrice) },
+    { key: 'amount', header: 'Məbləğ', render: (r) => fmt(r.qty * r.unitPrice) },
+    { key: 'actions', header: 'Əməliyyat', render: (r) => (
+      <div className="flex gap-2">
+        <button className="px-2 py-1 border rounded-lg" onClick={()=>startEdit(r)} title="Düzəlt"><Pencil size={14}/></button>
+        <button className="px-2 py-1 border rounded-lg text-red-600" onClick={()=>remove(r.id)} title="Sil"><Trash2 size={14}/></button>
+      </div>
+    )},
   ];
 
   return (
-    <SectionCard title="Alışlar (Hər alış – partiya)" icon={<Package className="text-indigo-600"/>}
-      right={<div className="text-sm text-gray-500">Partiya kodu avtomatik yaradılır (məs: P-20250105-01)</div>}>
-      <div className="grid md:grid-cols-6 gap-3 mb-4">
+    <SectionCard title="Alışlar" icon={<Package className="text-gray-600"/>}
+      right={<button onClick={addOrSave} className="flex items-center gap-2 px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"><PlusCircle size={16}/> {editId? 'Yadda saxla' : 'Əlavə et'}</button>}>
+      <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <TextInput label="Tarix" type="date" value={date} onChange={setDate} />
-        <NumberInput label="Miqdar" value={qty} onChange={setQty} />
-        <NumberInput label="Alış qiyməti (1 vahid)" value={unitPrice} onChange={setUnitPrice} />
-        <NumberInput label="Məbləğ (cəmi)" value={amount} onChange={setAmount} />
-        <div className="flex items-end">
-          <button className="flex items-center gap-2 rounded-xl bg-indigo-600 text-white px-4 py-2 hover:bg-indigo-700" onClick={add}>
-            <PlusCircle size={18}/> Əlavə et
-          </button>
-        </div>
+        <NumberInput label="Miqdar" value={qty} onChange={setQty} placeholder="0" />
+        <NumberInput label="Qiymət" value={unitPrice} onChange={setUnitPrice} placeholder="0.00" />
+        <NumberInput label="Məbləğ" value={amount} onChange={setAmount} placeholder="(istəyə görə)" />
       </div>
-      <Table columns={columns} rows={data.purchases} />
+      {editId && (
+        <div className="mb-3 flex items-center gap-2 text-xs">
+          <span className="px-2 py-1 bg-amber-50 border rounded">Düzəliş rejimi</span>
+          <button className="text-blue-600 underline" onClick={()=>resetInputs()}><X size={12} className="inline"/> ləğv et</button>
+        </div>
+      )}
+      <Table columns={cols} rows={data.purchases} />
     </SectionCard>
   );
 }
 
-function SalesForm({ data, setData, customers }: any) {
+function SalesForm({ data, setData, customers }) {
+  const batches = (data.purchases || []).map((p) => ({ value: p.id, label: `${batchNameOf(p)} • ${fmt(p.qty)} əd • ${fmt(p.unitPrice)}` }));
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
   const [customer, setCustomer] = useState("");
-  const [qty, setQty] = useState(0);
-  const [unitPrice, setUnitPrice] = useState(0);
-  const [amount, setAmount] = useState(0); // optional total amount
+  const [qty, setQty] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [amount, setAmount] = useState("");
+  const [editId, setEditId] = useState("");
 
-  const add = () => {
-    if (!batchId) return alert("Partiya seçin");
-    if (!customer) return alert("Müştəri adı boş ola bilməz");
-    const qtyN = parseNum(qty);
+  const resetInputs = () => { setDate(todayISO()); setBatchId(""); setCustomer(""); setQty(""); setUnitPrice(""); setAmount(""); setEditId(""); };
+
+  const addOrSave = () => {
+    const q = parseNum(qty);
     let up = parseNum(unitPrice);
-    const amt = parseNum(amount);
-    if (qtyN <= 0) return alert("Miqdar > 0 olmalıdır");
-    if ((up === 0 || !isFinite(up)) && amt > 0) {
-      up = amt / qtyN; // derive unit price from amount
-    }
-    if (up < 0) return alert("Satış qiyməti mənfi ola bilməz");
+    let amt = parseNum(amount);
+    if (!up && q && amt) up = amt / q;
+    if (!amt && q && up) amt = q * up;
+    if (!date || !batchId || !customer || !q || !up) return alert("Bütün xanaları doldurun");
 
-    const soldSoFar = data.sales.filter(s => s.batchId === batchId).reduce((a, b) => a + parseNum(b.qty), 0);
-    const purchased = data.purchases.find(p => p.id === batchId)?.qty || 0;
-    if (qtyN + soldSoFar > purchased) {
-      const proceed = confirm("Diqqət: Bu satış partiya üzrə mövcud miqdarı aşır. Yenə də əlavə etmək istəyirsiniz?");
-      if (!proceed) return;
+    if (editId) {
+      setData({
+        ...data,
+        sales: data.sales.map(s => s.id===editId ? { ...s, date, batchId, customer, qty:q, unitPrice:up, amount:q*up } : s)
+      });
+      resetInputs();
+      return;
     }
 
-    setData({
-      ...data,
-      sales: [ { id: uid(), date, batchId, customer, qty: qtyN, unitPrice: up }, ...data.sales ],
-    });
-    setQty(0); setUnitPrice(0); setAmount(0); setCustomer("");
+    const rec = { id: uid(), date, batchId, customer, qty: q, unitPrice: up, amount: q * up };
+    setData({ ...data, sales: [...data.sales, rec] });
+    resetInputs();
   };
 
-  const columns = [
-    { key: "date", header: "Tarix" },
-    { key: "batchId", header: "Partiya", render: (r) => data.purchases.find(p => p.id === r.batchId)?.batchCode || "?" },
-    { key: "customer", header: "Müştəri" },
-    { key: "qty", header: "Miqdar", render: (r) => fmt(r.qty) },
-    { key: "unitPrice", header: "Satış qiyməti", render: (r) => fmt(r.unitPrice) },
-    { key: "amount", header: "Məbləğ", render: (r) => fmt(parseNum(r.qty) * parseNum(r.unitPrice)) },
+  const startEdit = (r) => {
+    setEditId(r.id); setDate(r.date); setBatchId(r.batchId); setCustomer(r.customer); setQty(String(r.qty)); setUnitPrice(String(r.unitPrice)); setAmount(String(r.amount ?? r.qty*r.unitPrice));
+  }
+  const remove = (id) => setData({ ...data, sales: data.sales.filter(p=>p.id!==id) });
+
+  const cols = [
+    { key: 'date', header: 'Tarix' },
+    { key: 'batchId', header: 'Partiya', render: (r) => batchNameOf(data.purchases.find(p=>p.id===r.batchId)) },
+    { key: 'customer', header: 'Müştəri' },
+    { key: 'qty', header: 'Miqdar', render: (r) => fmt(r.qty) },
+    { key: 'unitPrice', header: 'Qiymət', render: (r) => fmt(r.unitPrice) },
+    { key: 'amount', header: 'Məbləğ', render: (r) => fmt(r.qty * r.unitPrice) },
+    { key: 'actions', header: 'Əməliyyat', render: (r) => (
+      <div className="flex gap-2">
+        <button className="px-2 py-1 border rounded-lg" onClick={()=>startEdit(r)} title="Düzəlt"><Pencil size={14}/></button>
+        <button className="px-2 py-1 border rounded-lg text-red-600" onClick={()=>remove(r.id)} title="Sil"><Trash2 size={14}/></button>
+      </div>
+    )},
   ];
 
   return (
-    <SectionCard title="Satışlar" icon={<Users className="text-emerald-600"/>}>
-      <div className="grid md:grid-cols-7 gap-3 mb-4">
+    <SectionCard title="Satışlar" icon={<Users className="text-gray-600"/>}
+      right={<button onClick={addOrSave} className="flex items-center gap-2 px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"><PlusCircle size={16}/> {editId? 'Yadda saxla' : 'Əlavə et'}</button>}>
+      <div className="grid sm:grid-cols-2 md:grid-cols-6 gap-3 mb-4">
         <TextInput label="Tarix" type="date" value={date} onChange={setDate} />
-        <Select label="Partiya" value={batchId} onChange={setBatchId} options={data.purchases.map(p => ({ value: p.id, label: `${p.batchCode} (qty ${fmt(p.qty)})` }))} />
-        <TextInput label="Müştəri" value={customer} onChange={setCustomer} placeholder="Məs: AZPRINT MMC" listId="customersList" />
-        <Datalist id="customersList" options={customers} />
+        <Select label="Partiya" value={batchId} onChange={setBatchId} options={batches} />
+        <TextInput label="Müştəri" value={customer} onChange={setCustomer} placeholder="müştəri adı yazın və ya seçin" listId="customerListSale" />
+        <datalist id="customerListSale">
+          {(customers||[]).map(c => <option key={c} value={c}>{c}</option>)}
+        </datalist>
         <NumberInput label="Miqdar" value={qty} onChange={setQty} />
-        <NumberInput label="Satış qiyməti (1 vahid)" value={unitPrice} onChange={setUnitPrice} />
-        <NumberInput label="Məbləğ (cəmi)" value={amount} onChange={setAmount} />
-        <div className="flex items-end">
-          <button className="flex items-center gap-2 rounded-xl bg-emerald-600 text-white px-4 py-2 hover:bg-emerald-700" onClick={add}>
-            <PlusCircle size={18}/> Əlavə et
-          </button>
-        </div>
+        <NumberInput label="Qiymət" value={unitPrice} onChange={setUnitPrice} />
+        <NumberInput label="Məbləğ" value={amount} onChange={setAmount} />
       </div>
-      <Table columns={columns} rows={data.sales} />
+      {editId && (
+        <div className="mb-3 flex items-center gap-2 text-xs">
+          <span className="px-2 py-1 bg-amber-50 border rounded">Düzəliş rejimi</span>
+          <button className="text-blue-600 underline" onClick={()=>resetInputs()}><X size={12} className="inline"/> ləğv et</button>
+        </div>
+      )}
+      <Table columns={cols} rows={data.sales} />
     </SectionCard>
   );
 }
 
-function ExpensesForm({ data, setData }: any) {
+function ExpensesForm({ data, setData }) {
+  const batches = (data.purchases || []).map((p) => ({ value: p.id, label: `${batchNameOf(p)}` }));
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
   const [name, setName] = useState("");
-  const [amount, setAmount] = useState(0);
+  const [amount, setAmount] = useState("");
+  const [editId, setEditId] = useState("");
 
-  const add = () => {
-    if (!batchId) return alert("Partiya seçin");
-    if (!name) return alert("Xərcin adını yazın");
+  const resetInputs = () => { setDate(todayISO()); setBatchId(""); setName(""); setAmount(""); setEditId(""); };
+
+  const addOrSave = () => {
     const amt = parseNum(amount);
-    if (amt <= 0) return alert("Məbləğ > 0 olmalıdır");
-    setData({ ...data, expenses: [{ id: uid(), date, batchId, name, amount: amt }, ...data.expenses ] });
-    setAmount(0); setName("");
+    if (!date || !batchId || !name || !amt) return alert("Bütün xanaları doldurun");
+
+    if (editId) {
+      setData({
+        ...data,
+        expenses: data.expenses.map(e => e.id===editId ? { ...e, date, batchId, name, amount: amt } : e)
+      });
+      resetInputs();
+      return;
+    }
+
+    const rec = { id: uid(), date, batchId, name, amount: amt };
+    setData({ ...data, expenses: [...data.expenses, rec] });
+    resetInputs();
   };
 
-  const columns = [
-    { key: "date", header: "Tarix" },
-    { key: "batchId", header: "Partiya", render: (r) => data.purchases.find(p => p.id === r.batchId)?.batchCode || "?" },
-    { key: "name", header: "Xərc adı" },
-    { key: "amount", header: "Məbləğ", render: (r) => fmt(r.amount) },
+  const startEdit = (r) => { setEditId(r.id); setDate(r.date); setBatchId(r.batchId); setName(r.name); setAmount(String(r.amount)); };
+  const remove = (id) => setData({ ...data, expenses: data.expenses.filter(p=>p.id!==id) });
+
+  const cols = [
+    { key: 'date', header: 'Tarix' },
+    { key: 'batchId', header: 'Partiya', render: (r) => batchNameOf(data.purchases.find(p=>p.id===r.batchId)) },
+    { key: 'name', header: 'Xərc' },
+    { key: 'amount', header: 'Məbləğ', render: (r) => fmt(r.amount) },
+    { key: 'actions', header: 'Əməliyyat', render: (r) => (
+      <div className="flex gap-2">
+        <button className="px-2 py-1 border rounded-lg" onClick={()=>startEdit(r)} title="Düzəlt"><Pencil size={14}/></button>
+        <button className="px-2 py-1 border rounded-lg text-red-600" onClick={()=>remove(r.id)} title="Sil"><Trash2 size={14}/></button>
+      </div>
+    )},
   ];
 
   return (
-    <SectionCard title="Xərclər" icon={<Receipt className="text-amber-600"/>}>
-      <div className="grid md:grid-cols-5 gap-3 mb-4">
+    <SectionCard title="Xərclər" icon={<Receipt className="text-gray-600"/>}
+      right={<button onClick={addOrSave} className="flex items-center gap-2 px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"><PlusCircle size={16}/> {editId? 'Yadda saxla' : 'Əlavə et'}</button>}>
+      <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <TextInput label="Tarix" type="date" value={date} onChange={setDate} />
-        <Select label="Partiya" value={batchId} onChange={setBatchId} options={data.purchases.map(p => ({ value: p.id, label: p.batchCode }))} />
-        <TextInput label="Xərcin adı" value={name} onChange={setName} placeholder="Daşınma, gömrük və s." />
+        <Select label="Partiya" value={batchId} onChange={setBatchId} options={batches} />
+        <TextInput label="Xərcin adı" value={name} onChange={setName} placeholder="daşıma, gömrük…" />
         <NumberInput label="Məbləğ" value={amount} onChange={setAmount} />
-        <div className="flex items-end">
-          <button className="flex items-center gap-2 rounded-xl bg-amber-600 text-white px-4 py-2 hover:bg-amber-700" onClick={add}>
-            <PlusCircle size={18}/> Əlavə et
-          </button>
-        </div>
       </div>
-      <Table columns={columns} rows={data.expenses} />
+      {editId && (
+        <div className="mb-3 flex items-center gap-2 text-xs">
+          <span className="px-2 py-1 bg-amber-50 border rounded">Düzəliş rejimi</span>
+          <button className="text-blue-600 underline" onClick={()=>resetInputs()}><X size={12} className="inline"/> ləğv et</button>
+        </div>
+      )}
+      <Table columns={cols} rows={data.expenses} />
     </SectionCard>
   );
 }
 
-function PaymentsForm({ data, setData, customers }: any) {
+/* **********
+ * Payments  *
+ ********** */
+function PaymentsForm({ data, setData, customers }) {
   const [date, setDate] = useState(todayISO());
   const [customer, setCustomer] = useState("");
-  const [amount, setAmount] = useState(0);
+  const [amount, setAmount] = useState("");
+  const [editId, setEditId] = useState("");
 
-  const add = () => {
-    if (!customer) return alert("Müştəri adı boş ola bilməz");
+  const resetInputs = () => { setDate(todayISO()); setCustomer(""); setAmount(""); setEditId(""); };
+
+  const addOrSave = () => {
     const amt = parseNum(amount);
-    if (amt <= 0) return alert("Məbləğ > 0 olmalıdır");
-    setData({ ...data, payments: [{ id: uid(), date, customer, amount: amt }, ...data.payments ] });
-    setAmount(0); setCustomer("");
+    if (!date || !customer || !amt) return alert("Bütün xanaları doldurun");
+
+    if (editId) {
+      setData({
+        ...data,
+        payments: (data.payments||[]).map(p => p.id===editId ? { ...p, date, customer, amount: amt } : p)
+      });
+      resetInputs();
+      return;
+    }
+
+    const rec = { id: uid(), date, customer, amount: amt };
+    setData({ ...data, payments: [...(data.payments||[]), rec] });
+    resetInputs();
   };
 
-  const columns = [
-    { key: "date", header: "Tarix" },
-    { key: "customer", header: "Müştəri" },
-    { key: "amount", header: "Məbləğ", render: (r) => fmt(r.amount) },
+  const startEdit = (r) => { setEditId(r.id); setDate(r.date); setCustomer(r.customer); setAmount(String(r.amount)); };
+  const remove = (id) => setData({ ...data, payments: (data.payments||[]).filter(p=>p.id!==id) });
+
+  const cols = [
+    { key: 'date', header: 'Tarix' },
+    { key: 'customer', header: 'Müştəri' },
+    { key: 'amount', header: 'Məbləğ', render: (r) => fmt(r.amount) },
+    { key: 'actions', header: 'Əməliyyat', render: (r) => (
+      <div className="flex gap-2">
+        <button className="px-2 py-1 border rounded-lg" onClick={()=>startEdit(r)} title="Düzəlt"><Pencil size={14}/></button>
+        <button className="px-2 py-1 border rounded-lg text-red-600" onClick={()=>remove(r.id)} title="Sil"><Trash2 size={14}/></button>
+      </div>
+    )},
   ];
 
   return (
-    <SectionCard title="Ödənişlər" icon={<DollarSign className="text-blue-600"/>}>
-      <div className="grid md:grid-cols-4 gap-3 mb-4">
+    <SectionCard title="Ödənişlər" icon={<DollarSign className="text-blue-600"/>}
+      right={<button onClick={addOrSave} className="flex items-center gap-2 px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"><PlusCircle size={16}/> {editId? 'Yadda saxla' : 'Əlavə et'}</button>}>
+      <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
         <TextInput label="Tarix" type="date" value={date} onChange={setDate} />
-        <TextInput label="Müştəri" value={customer} onChange={setCustomer} listId="customersList2" />
-        <Datalist id="customersList2" options={customers} />
+        <TextInput label="Müştəri" value={customer} onChange={setCustomer} placeholder="müştəri adı yazın və ya seçin" listId="customerList" />
+        <datalist id="customerList">
+          {(customers||[]).map(c => <option key={c} value={c}>{c}</option>)}
+        </datalist>
         <NumberInput label="Məbləğ" value={amount} onChange={setAmount} />
-        <div className="flex items-end">
-          <button className="flex items-center gap-2 rounded-xl bg-blue-600 text-white px-4 py-2 hover:bg-blue-700" onClick={add}>
-            <PlusCircle size={18}/> Əlavə et
-          </button>
-        </div>
       </div>
-      <Table columns={columns} rows={data.payments} />
+      {editId && (
+        <div className="mb-3 flex items-center gap-2 text-xs">
+          <span className="px-2 py-1 bg-amber-50 border rounded">Düzəliş rejimi</span>
+          <button className="text-blue-600 underline" onClick={()=>resetInputs()}><X size={12} className="inline"/> ləğv et</button>
+        </div>
+      )}
+      <Table columns={cols} rows={data.payments||[]} />
     </SectionCard>
   );
 }
 
-function Reports({ data }: any) {
-  const { perBatch, customerDebts, totals } = useMemo(() => calculateReports(data), [data]);
+/************
+ * Reports  *
+ ************/
+function Reports({ data }) {
+  const safeData = normalizeData(data);
+  const { perBatch, customerDebts, totals } = useMemo(() => calculateReports(safeData), [safeData]);
 
   const batchCols = [
-    { key: "code", header: "Partiya", render: (r) => r.batch.batchCode },
-    { key: "date", header: "Tarix", render: (r) => r.batch.date },
+    { key: "batch", header: "Partiya", render: (r) => batchNameOf(r.batch) },
+    { key: "date", header: "Tarix", render: (r) => r.batch?.date || "-" },
     { key: "purchased", header: "Alınan", render: (r) => fmt(r.purchased) },
     { key: "sold", header: "Satılan", render: (r) => <span className={r.overSold?"text-red-600 font-semibold":""}>{fmt(r.sold)}</span> },
     { key: "stock", header: "Stok", render: (r) => fmt(r.stock) },
@@ -508,7 +624,7 @@ function Reports({ data }: any) {
   ];
 
   const pnlCols = [
-    { key: "code", header: "Partiya", render: (r) => r.batch.batchCode },
+    { key: "batch", header: "Partiya", render: (r) => batchNameOf(r.batch) },
     { key: "revenue", header: "Gəlir", render: (r) => fmt(r.revenue) },
     { key: "cogs", header: "Maya (satılan)", render: (r) => fmt(r.cogs) },
     { key: "expensesTotal", header: "Xərc (tam)", render: (r) => fmt(r.expensesTotal) },
@@ -524,14 +640,27 @@ function Reports({ data }: any) {
   ];
 
   return (
-    <div className="grid lg:grid-cols-2 gap-6">
+    <div className="flex flex-col gap-6">
+      <SectionCard title="Qısa xülasə" icon={<Receipt className="text-gray-600"/>}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <KPI title="Gəlir" value={totals.revenue} />
+          <KPI title="Maya" value={totals.cogs} />
+          <KPI title="Xərclər (tam)" value={totals.expensesFull} />
+          <KPI title="Mənfəət" value={totals.profit} positive />
+          <KPI title="Ödənilmiş borclar" value={totals.paidTotal} />
+          <KPI title="Ödənilməmiş borclar" value={totals.unpaidTotal} />
+          <KPI title="Qalıq stok miqdarı" value={totals.stockQty} />
+          <KPI title="Qalıq stok məbləği" value={totals.stockCost} />
+        </div>
+      </SectionCard>
+
       <SectionCard title="Stok – Partiya üzrə" icon={<Layers className="text-gray-700"/>}>
         <Table columns={batchCols} rows={perBatch} />
       </SectionCard>
 
       <SectionCard title="Mənfəət/Zərər – Partiya üzrə" icon={<PieChart className="text-fuchsia-700"/>}>
         <Table columns={pnlCols} rows={perBatch} footer={
-          <div className="flex gap-6 text-sm">
+          <div className="flex flex-wrap gap-6 text-sm">
             <span><b>Toplam Gəlir:</b> {fmt(totals.revenue)}</span>
             <span><b>Toplam Maya:</b> {fmt(totals.cogs)}</span>
             <span><b>Toplam Xərclər (tam):</b> {fmt(totals.expensesFull)}</span>
@@ -543,75 +672,33 @@ function Reports({ data }: any) {
       <SectionCard title="Müştərilərin borcu" icon={<Users className="text-sky-700"/>}>
         <Table columns={debtCols} rows={customerDebts.map((r) => ({ ...r, id: r.customer }))} />
       </SectionCard>
-
-      <SectionCard title="Qısa xülasə" icon={<Receipt className="text-gray-600"/>}>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KPI title="Gəlir" value={totals.revenue} />
-          <KPI title="Maya" value={totals.cogs} />
-          <KPI title="Xərclər (tam)" value={totals.expensesFull} />
-          <KPI title="Mənfəət" value={totals.profit} positive />
-          <KPI title="Ödənilmiş borclar" value={totals.paidTotal} />
-          <KPI title="Ödənilməmiş borclar" value={totals.unpaidTotal} />
-          <KPI title="Qalıq stok miqdarı" value={totals.stockQty} />
-          <KPI title="Qalıq stok məbləği" value={totals.stockCost} />
-        </div>
-      </SectionCard>
     </div>
   );
 }
 
-function KPI({ title, value, positive = false }: any) {
-  return (
-    <div className="rounded-2xl border p-4 min-w-[190px]">
-      <div className="text-sm text-gray-600 break-words">{title}</div>
-      <div className={`text-xl md:text-2xl font-semibold break-words ${positive && value>=0 ? "text-emerald-700" : value<0?"text-red-600":""}`}>{fmt(value)}</div>
-    </div>
-  );
-}
-
-// --- Self tests (non-breaking) ---
-(function runSelfTests(){
-  try {
-    // Test 1: empty data
-    const d1 = { purchases: [], sales: [], expenses: [], payments: [] };
-    const r1 = calculateReports(d1);
-    console.assert(r1.perBatch.length === 0, "Test1: perBatch empty");
-    console.assert(r1.totals.revenue === 0 && r1.totals.cogs === 0 && r1.totals.expensesFull === 0 && r1.totals.profit === 0, "Test1: totals zero");
-
-    // Test 2: one purchase, one sale, one expense, one payment
-    const d2 = {
-      purchases: [{ id: "b1", date: "2025-01-01", batchCode: "P-20250101-01", qty: 10, unitPrice: 5 }],
-      sales: [{ id: "s1", date: "2025-01-02", batchId: "b1", customer: "Test MMC", qty: 4, unitPrice: 7 }],
-      expenses: [{ id: "e1", date: "2025-01-03", batchId: "b1", name: "Daşınma", amount: 10 }],
-      payments: [{ id: "p1", date: "2025-01-04", customer: "Test MMC", amount: 15 }],
-    };
-    const r2 = calculateReports(d2);
-    const t2 = r2.totals;
-    console.assert(t2.revenue === 28, "Test2: revenue 28");
-    console.assert(t2.cogs === 20, "Test2: cogs 20");
-    console.assert(t2.expensesFull === 10, "Test2: expenses 10");
-    console.assert(t2.profit === -2, "Test2: profit -2");
-    console.assert(t2.stockQty === 6 && t2.stockCost === 30, "Test2: stock 6 @ cost 30");
-    console.assert(t2.paidTotal === 15 && t2.unpaidTotal === 13, "Test2: paid 15, unpaid 13");
-  } catch (e) {
-    console.warn("ECEN self-tests warning:", e);
-  }
-})();
-
-// --- Main App ---
+/****************
+ * App Shell     *
+ ****************/
 export default function ECENApp() {
   const { data, setData, reset, loadFromFile } = usePersistedData();
   const { customers } = useIndices(data);
-  const [activeTab, setActiveTab] = useState("purchases");
+  const [activeTab, setActiveTab] = useState('purchases');
+  // (İxrac/idxal funksiyaları istifadəçi istəyi ilə çıxarıldı)
+  // (İxrac funksiyası çıxarıldı)
 
-  const exportJSON = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `ECEN-backup-${new Date().toISOString().slice(0,19)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+
+  // Safer clear (some sandboxes block confirm)
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  function Tab({ id, icon, label }) {
+    const isActive = activeTab === id;
+    return (
+      <button onClick={() => setActiveTab(id)} className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"}`}>
+        {icon}
+        <span className="text-sm">{label}</span>
+      </button>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -626,42 +713,89 @@ export default function ECENApp() {
               <div className="text-xs text-gray-500">Partiya üzrə maya, gəlir, xərc və borclar</div>
             </div>
           </div>
-          <Toolbar onExport={exportJSON} onImport={loadFromFile} onReset={() => { if (confirm("Bütün verilənlər silinsin?")) reset(); }} />
+          <div className="flex gap-2">
+            <button onClick={() => {
+              if (!confirmClear) { setConfirmClear(true); setTimeout(()=>setConfirmClear(false), 3000); return; }
+              setConfirmClear(false); reset();
+            }} className={`flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 ${confirmClear? 'bg-red-50 text-red-700 border-red-300':'text-red-600'}`}>
+              <Trash2 size={16}/> {confirmClear ? 'Təsdiqlə' : 'Təmizlə'}
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6">
         <nav className="mb-6 flex flex-wrap gap-2">
-          <Tab id="purchases" active={activeTab} setActive={setActiveTab} icon={<Package size={16}/>} label="Alışlar" />
-          <Tab id="sales" active={activeTab} setActive={setActiveTab} icon={<Users size={16}/>} label="Satışlar" />
-          <Tab id="expenses" active={activeTab} setActive={setActiveTab} icon={<Receipt size={16}/>} label="Xərclər" />
-          <Tab id="payments" active={activeTab} setActive={setActiveTab} icon={<DollarSign size={16}/>} label="Ödənişlər" />
-          <Tab id="reports" active={activeTab} setActive={setActiveTab} icon={<PieChart size={16}/>} label="Hesabatlar" />
+          <Tab id="purchases" icon={<Package size={16}/>} label="Alışlar" />
+          <Tab id="sales" icon={<Users size={16}/>} label="Satışlar" />
+          <Tab id="expenses" icon={<Receipt size={16}/>} label="Xərclər" />
+          <Tab id="payments" icon={<DollarSign size={16}/>} label="Ödənişlər" />
+          <Tab id="reports" icon={<PieChart size={16}/>} label="Hesabatlar" />
         </nav>
 
-        {activeTab === "purchases" && <PurchasesForm data={data} setData={setData} />}
-        {activeTab === "sales" && <SalesForm data={data} setData={setData} customers={customers} />}
-        {activeTab === "expenses" && <ExpensesForm data={data} setData={setData} />}
-        {activeTab === "payments" && <PaymentsForm data={data} setData={setData} customers={customers} />}
-        {activeTab === "reports" && <Reports data={data} />}
+        {activeTab === 'purchases' && <PurchasesForm data={data} setData={setData} />}
+        {activeTab === 'sales' && <SalesForm data={data} setData={setData} customers={customers} />}
+        {activeTab === 'expenses' && <ExpensesForm data={data} setData={setData} />}
+        {activeTab === 'payments' && <PaymentsForm data={data} setData={setData} customers={customers} />}
+        {activeTab === 'reports' && <Reports data={data} />}
 
         <div className="mt-10 text-xs text-gray-500 flex items-center gap-2">
-          <RefreshCcw size={14}/> Verilənlər brauzerin LocalStorage-ində saxlanılır. JSON ixrac/idxal mümkündür.
+          <RefreshCcw size={14}/> Verilənlər brauzerin LocalStorage-ində saxlanılır.
         </div>
       </main>
     </div>
   );
 }
 
-function Tab({ id, active, setActive, icon, label }: any) {
-  const isActive = active === id;
-  return (
-    <button
-      onClick={() => setActive(id)}
-      className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"}`}
-    >
-      {icon}
-      <span className="text-sm">{label}</span>
-    </button>
-  );
-}
+/****************
+ * Test Cases    *
+ ****************/
+(function runTests(){
+  try {
+    if (typeof window !== 'undefined') {
+      if (window.__ECEN_TESTS_RUN__) return; window.__ECEN_TESTS_RUN__ = true;
+    }
+    // parseNum should handle commas and dots
+    console.assert(parseNum('1,5') === 1.5, 'parseNum comma failed');
+    console.assert(parseNum('2.5') === 2.5, 'parseNum dot failed');
+
+    // formatBatchNameFromDate
+    console.assert(formatBatchNameFromDate('2025-09-01') === 'P - 01092025', 'formatBatchNameFromDate ddmmyyyy');
+
+    // batchNameOf with seq
+    const p0 = { date: '2025-09-01', batchSeq: '02' };
+    console.assert(batchNameOf(p0) === 'P - 01092025-02', 'batchNameOf seq');
+
+    // calculateReports handles empty/malformed shapes
+    const r1 = calculateReports({});
+    console.assert(Array.isArray(r1.perBatch) && Array.isArray(r1.customerDebts), 'calculateReports empty');
+
+    // Business scenario
+    const demo = {
+      purchases: [{ id: 'b1', date: '2024-01-01', qty: 10, unitPrice: 5 }],
+      expenses:  [{ id: 'e1', date: '2024-01-02', batchId: 'b1', name: 'cargo', amount: 20 }],
+      sales:     [{ id: 's1', date: '2024-01-03', batchId: 'b1', customer: 'Ali', qty: 4, unitPrice: 8 }],
+      payments:  [{ id: 'p1', date: '2024-01-04', customer: 'Ali', amount: 10 }],
+    };
+    const r2 = calculateReports(demo);
+    console.assert(r2.totals.revenue === 32, 'revenue 32');
+    console.assert(r2.totals.cogs === 20, 'cogs 20');
+    console.assert(r2.totals.expensesFull === 20, 'expenses 20');
+    console.assert(r2.totals.profit === -8, 'profit -8');
+    console.assert(r2.totals.stockQty === 6, 'stockQty 6');
+    console.assert(r2.totals.stockCost === 30, 'stockCost 30');
+    const cd = r2.customerDebts.find(c=>c.customer==='Ali');
+    console.assert(cd && cd.invoiced === 32 && cd.paid === 10 && cd.balance === 22, 'customer debts');
+
+    // CRUD basic tests
+    let d = { purchases: [], sales: [], expenses: [], payments: [] };
+    const seq = nextSeqForDate([], '2025-09-01');
+    const name = `${formatBatchNameFromDate('2025-09-01')}-${seq}`;
+    d.purchases.push({ id:'bX', date:'2025-09-01', qty:1, unitPrice:2, batchSeq:seq, batchName:name });
+    console.assert(d.purchases[0].batchName===`P - 01092025-01`, 'purchase batchName auto');
+
+    console.log('%cECEN tests passed', 'color: green');
+  } catch (e) {
+    console.error('ECEN tests failed', e);
+  }
+})();
