@@ -683,12 +683,42 @@ export default function ECENApp() {
   const { data, setData, reset, loadFromFile } = usePersistedData();
   const { customers } = useIndices(data);
   const [activeTab, setActiveTab] = useState('purchases');
-  // (İxrac/idxal funksiyaları istifadəçi istəyi ilə çıxarıldı)
-  // (İxrac funksiyası çıxarıldı)
-
 
   // Safer clear (some sandboxes block confirm)
   const [confirmClear, setConfirmClear] = useState(false);
+
+  // --- Export / Import (JSON) ---
+  const exportJSON = () => {
+    try {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ECEN-backup-${new Date().toISOString().slice(0,19)}.json`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      alert("İxrac xətası: " + (e?.message || e));
+    }
+  };
+
+  const handleImport = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const json = JSON.parse(String(reader.result));
+        loadFromFile(json);
+        alert("İdxal edildi ✅");
+      } catch (e) {
+        alert("İdxal xətası: " + (e?.message || e));
+      }
+    };
+    reader.readAsText(file);
+  };
 
   function Tab({ id, icon, label }) {
     const isActive = activeTab === id;
@@ -714,6 +744,21 @@ export default function ECENApp() {
             </div>
           </div>
           <div className="flex gap-2">
+            <button onClick={exportJSON}
+              className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50">
+              İxrac
+            </button>
+
+            <label className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 cursor-pointer">
+              İdxal
+              <input
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(e) => handleImport(e.target.files?.[0])}
+              />
+            </label>
+
             <button onClick={() => {
               if (!confirmClear) { setConfirmClear(true); setTimeout(()=>setConfirmClear(false), 3000); return; }
               setConfirmClear(false); reset();
@@ -793,6 +838,12 @@ export default function ECENApp() {
     const name = `${formatBatchNameFromDate('2025-09-01')}-${seq}`;
     d.purchases.push({ id:'bX', date:'2025-09-01', qty:1, unitPrice:2, batchSeq:seq, batchName:name });
     console.assert(d.purchases[0].batchName===`P - 01092025-01`, 'purchase batchName auto');
+    const seq2 = nextSeqForDate(d.purchases, '2025-09-01');
+    console.assert(seq2==='02','nextSeqForDate second');
+
+    // normalizeData robustness
+    const n1 = normalizeData(null);
+    console.assert(Array.isArray(n1.purchases) && n1.purchases.length===0, 'normalizeData null ok');
 
     console.log('%cECEN tests passed', 'color: green');
   } catch (e) {
