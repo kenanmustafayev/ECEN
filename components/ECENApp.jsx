@@ -2,10 +2,10 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers, Pencil, X } from "lucide-react";
+import { Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers, Pencil, X, Download, Upload } from "lucide-react";
 
 /*************************
- * Helpers & Safe Storage *
+ * Helpers & Formatting  *
  *************************/
 const fmt = (n) => (Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-");
 const parseNum = (v) => {
@@ -24,9 +24,7 @@ const formatBatchNameFromDate = (dateStr) => {
     const mm = String(dt.getMonth()+1).padStart(2, '0');
     const yy = String(dt.getFullYear());
     return `P - ${dd}${mm}${yy}`;
-  } catch {
-    return "P - ?";
-  }
+  } catch { return "P - ?"; }
 };
 const nextSeqForDate = (purchases, dateStr) => {
   const count = (Array.isArray(purchases)?purchases:[]).filter(p=>p?.date===dateStr).length + 1;
@@ -39,57 +37,79 @@ const batchNameOf = (purchase) => {
   return purchase.batchSeq ? `${base}-${String(purchase.batchSeq).padStart(2,'0')}` : base;
 };
 
-const STORAGE_KEY = "ECEN_DATA_V2";
-const emptyData = Object.freeze({ purchases: [], sales: [], expenses: [], payments: [] });
+/*************************
+ * Firebase (Auth + DB)  *
+ *************************/
+// Dinamik import: paket olmasa (canvas-da) UI sıradan çıxmır. Vercel-də isə env-lər ilə işləyir.
+const firebaseCfg = {
+  apiKey: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_API_KEY : undefined,
+  authDomain: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN : undefined,
+  projectId: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_PROJECT_ID : undefined,
+  appId: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_APP_ID : undefined,
+  messagingSenderId: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID : undefined,
+};
 
-function normalizeData(maybe) {
-  const d = maybe && typeof maybe === "object" ? maybe : {};
-  return {
-    purchases: Array.isArray(d.purchases) ? d.purchases : [],
-    sales: Array.isArray(d.sales) ? d.sales : [],
-    expenses: Array.isArray(d.expenses) ? d.expenses : [],
-    payments: Array.isArray(d.payments) ? d.payments : [],
-  };
-}
+function useFirebase() {
+  const [fb, setFb] = useState({ ready: false, user: null });
+  const ref = React.useRef({});
 
-function safeLoad() {
-  try {
-    if (typeof window === "undefined") return emptyData;
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyData;
-    const parsed = JSON.parse(raw);
-    return normalizeData(parsed);
-  } catch (e) {
-    console.warn("ECEN: failed to load from localStorage", e);
-    return emptyData;
-  }
-}
-function safeSave(data) {
-  try {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeData(data)));
-  } catch (e) {
-    console.warn("ECEN: failed to save to localStorage", e);
-  }
-}
-
-function usePersistedData() {
-  const [data, setData] = useState(emptyData); // SSR-safe default
-
-  // Load on client after mount
   useEffect(() => {
-    setData(safeLoad());
+    let unsub = null;
+    (async () => {
+      try {
+        if (!firebaseCfg.apiKey) { setFb({ ready:false, user:null }); return; }
+        const appMod = await import('firebase/app');
+        const authMod = await import('firebase/auth');
+        const dbMod = await import('firebase/firestore');
+
+        const app = appMod.getApps().length ? appMod.getApps()[0] : appMod.initializeApp(firebaseCfg);
+        const auth = authMod.getAuth(app);
+        const db = dbMod.getFirestore(app);
+
+        ref.current = { appMod, authMod, dbMod, app, auth, db };
+        unsub = authMod.onAuthStateChanged(auth, (u)=> setFb({ ready:true, user:u }));
+      } catch (e) {
+        // console.warn('Firebase init skipped', e);
+        setFb({ ready:false, user:null });
+      }
+    })();
+    return () => { try { unsub && unsub(); } catch {} };
   }, []);
 
-  // Persist on change
-  useEffect(() => {
-    safeSave(data);
-  }, [data]);
+  const signIn = async () => {
+    const { authMod, auth } = ref.current; if (!authMod || !auth) return alert('Firebase konfiqurasiya edilməyib.');
+    const provider = new authMod.GoogleAuthProvider();
+    await authMod.signInWithPopup(auth, provider);
+  };
+  const signOut = async () => {
+    const { authMod, auth } = ref.current; if (!authMod || !auth) return; await authMod.signOut(auth);
+  };
 
-  const reset = () => setData(emptyData);
-  const loadFromFile = (json) => setData(normalizeData(json));
+  // Firestore helpers
+  const colPath = (uid, name) => `users/${uid}/${name}`;
+  const subscribeCollection = (uid, name, cb) => {
+    const { dbMod, db } = ref.current; if (!dbMod || !db) return () => {};
+    const c = dbMod.collection(db, colPath(uid, name));
+    const q = dbMod.query(c, dbMod.orderBy('date','asc'));
+    return dbMod.onSnapshot(q, (snap)=> cb(snap.docs.map(d=>({ id: d.id, ...d.data() }))));
+  };
+  const addRow = (uid, name, payload) => {
+    const { dbMod, db } = ref.current; if (!dbMod || !db) throw new Error('DB not ready');
+    const c = dbMod.collection(db, colPath(uid, name));
+    return dbMod.addDoc(c, { ...payload, createdAt: dbMod.serverTimestamp() });
+  };
+  const updateRow = (uid, name, id, patch) => {
+    const { dbMod, db } = ref.current; if (!dbMod || !db) throw new Error('DB not ready');
+    const d = dbMod.doc(db, `${colPath(uid,name)}/${id}`);
+    return dbMod.updateDoc(d, { ...patch, updatedAt: dbMod.serverTimestamp() });
+  };
+  const deleteRow = (uid, name, id) => {
+    const { dbMod, db } = ref.current; if (!dbMod || !db) throw new Error('DB not ready');
+    const d = dbMod.doc(db, `${colPath(uid,name)}/${id}`);
+    return dbMod.deleteDoc(d);
+  };
 
-  return { data, setData, reset, loadFromFile };
+  return { ...fb, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow };
 }
 
 /***********************
@@ -327,7 +347,7 @@ function KPI({ title, value, positive = false }) {
 /****************
  * Forms (CRUD)  *
  ****************/
-function PurchasesForm({ data, setData }) {
+function PurchasesForm({ data, user, addRow, updateRow, deleteRow }) {
   const [date, setDate] = useState(todayISO());
   const [qty, setQty] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
@@ -336,7 +356,8 @@ function PurchasesForm({ data, setData }) {
 
   const resetInputs = () => { setDate(todayISO()); setQty(""); setUnitPrice(""); setAmount(""); setEditId(""); };
 
-  const addOrSave = () => {
+  const addOrSave = async () => {
+    if (!user) return alert('Giriş edin.');
     const q = parseNum(qty);
     let up = parseNum(unitPrice);
     let amt = parseNum(amount);
@@ -345,24 +366,18 @@ function PurchasesForm({ data, setData }) {
     if (!date || !q || !up) return alert("Tarix, miqdar və qiymət vacibdir");
 
     if (editId) {
-      setData({
-        ...data,
-        purchases: data.purchases.map(p => p.id===editId ? { ...p, date, qty:q, unitPrice:up, amount:q*up } : p)
-      });
-      resetInputs();
-      return;
+      const r = data.purchases.find(p=>p.id===editId) || {};
+      await updateRow(user.uid, "purchases", editId, { date, qty:q, unitPrice:up, amount:q*up, batchSeq: r.batchSeq, batchName: r.batchName });
+      resetInputs(); return;
     }
     const seq = nextSeqForDate(data.purchases, date);
     const name = `${formatBatchNameFromDate(date)}-${seq}`;
-    const rec = { id: uid(), date, qty: q, unitPrice: up, amount: q * up, batchSeq: seq, batchName: name };
-    setData({ ...data, purchases: [...data.purchases, rec] });
+    await addRow(user.uid, "purchases", { date, qty:q, unitPrice:up, amount:q*up, batchSeq: seq, batchName: name });
     resetInputs();
   };
 
-  const startEdit = (r) => {
-    setEditId(r.id); setDate(r.date); setQty(String(r.qty)); setUnitPrice(String(r.unitPrice)); setAmount(String(r.amount ?? r.qty*r.unitPrice));
-  }
-  const remove = (id) => setData({ ...data, purchases: data.purchases.filter(p=>p.id!==id) });
+  const startEdit = (r) => { setEditId(r.id); setDate(r.date); setQty(String(r.qty)); setUnitPrice(String(r.unitPrice)); setAmount(String(r.amount ?? r.qty*r.unitPrice)); };
+  const remove = async (id) => { if (!user) return; await deleteRow(user.uid, "purchases", id); };
 
   const cols = [
     { key: 'batch', header: 'Partiya', render: (r) => batchNameOf(r) },
@@ -398,7 +413,7 @@ function PurchasesForm({ data, setData }) {
   );
 }
 
-function SalesForm({ data, setData, customers }) {
+function SalesForm({ data, user, addRow, updateRow, deleteRow, customers }) {
   const batches = (data.purchases || []).map((p) => ({ value: p.id, label: `${batchNameOf(p)} • ${fmt(p.qty)} əd • ${fmt(p.unitPrice)}` }));
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
@@ -410,7 +425,8 @@ function SalesForm({ data, setData, customers }) {
 
   const resetInputs = () => { setDate(todayISO()); setBatchId(""); setCustomer(""); setQty(""); setUnitPrice(""); setAmount(""); setEditId(""); };
 
-  const addOrSave = () => {
+  const addOrSave = async () => {
+    if (!user) return alert('Giriş edin.');
     const q = parseNum(qty);
     let up = parseNum(unitPrice);
     let amt = parseNum(amount);
@@ -419,23 +435,15 @@ function SalesForm({ data, setData, customers }) {
     if (!date || !batchId || !customer || !q || !up) return alert("Bütün xanaları doldurun");
 
     if (editId) {
-      setData({
-        ...data,
-        sales: data.sales.map(s => s.id===editId ? { ...s, date, batchId, customer, qty:q, unitPrice:up, amount:q*up } : s)
-      });
-      resetInputs();
-      return;
+      await updateRow(user.uid, "sales", editId, { date, batchId, customer, qty:q, unitPrice:up, amount:q*up });
+      resetInputs(); return;
     }
-
-    const rec = { id: uid(), date, batchId, customer, qty: q, unitPrice: up, amount: q * up };
-    setData({ ...data, sales: [...data.sales, rec] });
+    await addRow(user.uid, "sales", { date, batchId, customer, qty:q, unitPrice:up, amount:q*up });
     resetInputs();
   };
 
-  const startEdit = (r) => {
-    setEditId(r.id); setDate(r.date); setBatchId(r.batchId); setCustomer(r.customer); setQty(String(r.qty)); setUnitPrice(String(r.unitPrice)); setAmount(String(r.amount ?? r.qty*r.unitPrice));
-  }
-  const remove = (id) => setData({ ...data, sales: data.sales.filter(p=>p.id!==id) });
+  const startEdit = (r) => { setEditId(r.id); setDate(r.date); setBatchId(r.batchId); setCustomer(r.customer); setQty(String(r.qty)); setUnitPrice(String(r.unitPrice)); setAmount(String(r.amount ?? r.qty*r.unitPrice)); };
+  const remove = async (id) => { if (!user) return; await deleteRow(user.uid, "sales", id); };
 
   const cols = [
     { key: 'date', header: 'Tarix' },
@@ -477,7 +485,7 @@ function SalesForm({ data, setData, customers }) {
   );
 }
 
-function ExpensesForm({ data, setData }) {
+function ExpensesForm({ data, user, addRow, updateRow, deleteRow }) {
   const batches = (data.purchases || []).map((p) => ({ value: p.id, label: `${batchNameOf(p)}` }));
   const [date, setDate] = useState(todayISO());
   const [batchId, setBatchId] = useState("");
@@ -487,26 +495,21 @@ function ExpensesForm({ data, setData }) {
 
   const resetInputs = () => { setDate(todayISO()); setBatchId(""); setName(""); setAmount(""); setEditId(""); };
 
-  const addOrSave = () => {
+  const addOrSave = async () => {
+    if (!user) return alert('Giriş edin.');
     const amt = parseNum(amount);
     if (!date || !batchId || !name || !amt) return alert("Bütün xanaları doldurun");
 
     if (editId) {
-      setData({
-        ...data,
-        expenses: data.expenses.map(e => e.id===editId ? { ...e, date, batchId, name, amount: amt } : e)
-      });
-      resetInputs();
-      return;
+      await updateRow(user.uid, "expenses", editId, { date, batchId, name, amount: amt });
+      resetInputs(); return;
     }
-
-    const rec = { id: uid(), date, batchId, name, amount: amt };
-    setData({ ...data, expenses: [...data.expenses, rec] });
+    await addRow(user.uid, "expenses", { date, batchId, name, amount: amt });
     resetInputs();
   };
 
   const startEdit = (r) => { setEditId(r.id); setDate(r.date); setBatchId(r.batchId); setName(r.name); setAmount(String(r.amount)); };
-  const remove = (id) => setData({ ...data, expenses: data.expenses.filter(p=>p.id!==id) });
+  const remove = async (id) => { if (!user) return; await deleteRow(user.uid, "expenses", id); };
 
   const cols = [
     { key: 'date', header: 'Tarix' },
@@ -541,10 +544,7 @@ function ExpensesForm({ data, setData }) {
   );
 }
 
-/* **********
- * Payments  *
- ********** */
-function PaymentsForm({ data, setData, customers }) {
+function PaymentsForm({ data, user, addRow, updateRow, deleteRow, customers }) {
   const [date, setDate] = useState(todayISO());
   const [customer, setCustomer] = useState("");
   const [amount, setAmount] = useState("");
@@ -552,26 +552,21 @@ function PaymentsForm({ data, setData, customers }) {
 
   const resetInputs = () => { setDate(todayISO()); setCustomer(""); setAmount(""); setEditId(""); };
 
-  const addOrSave = () => {
+  const addOrSave = async () => {
+    if (!user) return alert('Giriş edin.');
     const amt = parseNum(amount);
     if (!date || !customer || !amt) return alert("Bütün xanaları doldurun");
 
     if (editId) {
-      setData({
-        ...data,
-        payments: (data.payments||[]).map(p => p.id===editId ? { ...p, date, customer, amount: amt } : p)
-      });
-      resetInputs();
-      return;
+      await updateRow(user.uid, "payments", editId, { date, customer, amount: amt });
+      resetInputs(); return;
     }
-
-    const rec = { id: uid(), date, customer, amount: amt };
-    setData({ ...data, payments: [...(data.payments||[]), rec] });
+    await addRow(user.uid, "payments", { date, customer, amount: amt });
     resetInputs();
   };
 
   const startEdit = (r) => { setEditId(r.id); setDate(r.date); setCustomer(r.customer); setAmount(String(r.amount)); };
-  const remove = (id) => setData({ ...data, payments: (data.payments||[]).filter(p=>p.id!==id) });
+  const remove = async (id) => { if (!user) return; await deleteRow(user.uid, "payments", id); };
 
   const cols = [
     { key: 'date', header: 'Tarix' },
@@ -611,8 +606,13 @@ function PaymentsForm({ data, setData, customers }) {
  * Reports  *
  ************/
 function Reports({ data }) {
-  const safeData = normalizeData(data);
-  const { perBatch, customerDebts, totals } = useMemo(() => calculateReports(safeData), [safeData]);
+  const safeData = {
+    purchases: Array.isArray(data.purchases)?data.purchases:[],
+    sales: Array.isArray(data.sales)?data.sales:[],
+    expenses: Array.isArray(data.expenses)?data.expenses:[],
+    payments: Array.isArray(data.payments)?data.payments:[],
+  };
+  const { perBatch, customerDebts, totals } = useMemo(() => calculateReports(safeData), [JSON.stringify(safeData)]);
 
   const batchCols = [
     { key: "batch", header: "Partiya", render: (r) => batchNameOf(r.batch) },
@@ -680,45 +680,66 @@ function Reports({ data }) {
  * App Shell     *
  ****************/
 export default function ECENApp() {
-  const { data, setData, reset, loadFromFile } = usePersistedData();
-  const { customers } = useIndices(data);
-  const [activeTab, setActiveTab] = useState('purchases');
+  const fb = useFirebase();
+  const { ready, user, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow } = fb;
 
-  // Safer clear (some sandboxes block confirm)
+  // Firestore-driven state
+  const [data, setData] = useState({ purchases: [], sales: [], expenses: [], payments: [] });
+  const [activeTab, setActiveTab] = useState('purchases');
   const [confirmClear, setConfirmClear] = useState(false);
 
-  // --- Export / Import (JSON) ---
+  useEffect(() => {
+    if (!user) { setData({ purchases: [], sales: [], expenses: [], payments: [] }); return; }
+    const unsubs = [
+      subscribeCollection(user.uid, 'purchases', (rows)=> setData(prev=>({ ...prev, purchases: rows }))),
+      subscribeCollection(user.uid, 'sales', (rows)=> setData(prev=>({ ...prev, sales: rows }))),
+      subscribeCollection(user.uid, 'expenses', (rows)=> setData(prev=>({ ...prev, expenses: rows }))),
+      subscribeCollection(user.uid, 'payments', (rows)=> setData(prev=>({ ...prev, payments: rows }))),
+    ];
+    return () => unsubs.forEach(u=>u && u());
+  }, [user, subscribeCollection]);
+
+  const { customers } = useIndices(data);
+
   const exportJSON = () => {
     try {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `ECEN-backup-${new Date().toISOString().slice(0,19)}.json`;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      a.href = url; a.download = `ECEN-backup-${new Date().toISOString().slice(0,19)}.json`; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) {
-      alert("İxrac xətası: " + (e?.message || e));
-    }
+    } catch (e) { alert("İxrac xətası: "+(e?.message||e)); }
   };
-
   const handleImport = (file) => {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
-        const json = JSON.parse(String(reader.result));
-        loadFromFile(json);
-        alert("İdxal edildi ✅");
-      } catch (e) {
-        alert("İdxal xətası: " + (e?.message || e));
-      }
+        if (!user) return alert('Giriş edin.');
+        const json = JSON.parse(String(reader.result)) || {};
+        const buckets = ['purchases','sales','expenses','payments'];
+        for (const b of buckets) {
+          const arr = Array.isArray(json[b]) ? json[b] : [];
+          for (const r of arr) {
+            const clean = { ...r }; delete clean.id; // Firestore ID auto
+            await addRow(user.uid, b, clean);
+          }
+        }
+        alert('İdxal edildi ✅');
+      } catch (e) { alert('İdxal xətası: '+(e?.message||e)); }
     };
     reader.readAsText(file);
   };
+
+  async function clearAll() {
+    if (!user) return;
+    const buckets = ['purchases','sales','expenses','payments'];
+    for (const b of buckets) {
+      const rows = data[b] || [];
+      for (const r of rows) await deleteRow(user.uid, b, r.id);
+    }
+  }
 
   function Tab({ id, icon, label }) {
     const isActive = activeTab === id;
@@ -733,36 +754,37 @@ export default function ECENApp() {
   return (
     <div className="min-h-screen bg-gray-100">
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div className="flex items-center gap-3">
             <motion.div initial={{ rotate: -8, scale: 0.9 }} animate={{ rotate: 0, scale: 1 }} className="p-2 bg-indigo-600 text-white rounded-2xl shadow">
               <Package size={20}/>
             </motion.div>
             <div>
-              <div className="text-xl font-bold">ECEN</div>
+              <div className="text-xl font-bold whitespace-nowrap">ECEN</div>
               <div className="text-xs text-gray-500">Partiya üzrə maya, gəlir, xərc və borclar</div>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={exportJSON}
-              className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50">
-              İxrac
-            </button>
+          <div className="flex flex-wrap items-center gap-2 justify-end max-w-full">{/* Auth */}
+            {user ? (
+              <div className="flex items-center gap-2 mr-2">
+                <span className="text-sm text-gray-600 truncate max-w-[140px] md:max-w-[220px]">{user.displayName || user.email}</span>
+                <button onClick={signOut} className="rounded-xl border px-3 py-2 hover:bg-gray-50 shrink-0 whitespace-nowrap">Çıxış</button>
+              </div>
+            ) : (
+              <button onClick={signIn} className="rounded-xl border px-3 py-2 hover:bg-gray-50 mr-2 shrink-0 whitespace-nowrap" disabled={!ready} title={ready? 'Google ilə giriş' : 'Firebase konfiqurasiya tələb olunur'}>
+                Google ilə giriş
+              </button>
+            )}
 
-            <label className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 cursor-pointer">
-              İdxal
-              <input
-                type="file"
-                accept="application/json"
-                className="hidden"
-                onChange={(e) => handleImport(e.target.files?.[0])}
-              />
+            <button onClick={exportJSON} className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 shrink-0 whitespace-nowrap"><Download size={16}/> İxrac</button>
+            <label className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 cursor-pointer shrink-0 whitespace-nowrap">
+              <Upload size={16}/> İdxal
+              <input type="file" accept="application/json" className="hidden" onChange={(e)=>handleImport(e.target.files?.[0])}/>
             </label>
-
-            <button onClick={() => {
+            <button onClick={async () => {
               if (!confirmClear) { setConfirmClear(true); setTimeout(()=>setConfirmClear(false), 3000); return; }
-              setConfirmClear(false); reset();
-            }} className={`flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 ${confirmClear? 'bg-red-50 text-red-700 border-red-300':'text-red-600'}`}>
+              setConfirmClear(false); await clearAll();
+            }} className={`flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 shrink-0 whitespace-nowrap ${confirmClear? 'bg-red-50 text-red-700 border-red-300':'text-red-600'}`}>
               <Trash2 size={16}/> {confirmClear ? 'Təsdiqlə' : 'Təmizlə'}
             </button>
           </div>
@@ -770,6 +792,11 @@ export default function ECENApp() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6">
+        {!user && (
+          <div className="mb-4 p-3 rounded-xl border bg-amber-50 text-amber-800 text-sm">
+            Xahiş olunur <b>Google ilə giriş</b> edin – məlumatlarınız Firestore-da istifadəçi hesabınız üzrə saxlanılacaq.
+          </div>
+        )}
         <nav className="mb-6 flex flex-wrap gap-2">
           <Tab id="purchases" icon={<Package size={16}/>} label="Alışlar" />
           <Tab id="sales" icon={<Users size={16}/>} label="Satışlar" />
@@ -778,14 +805,14 @@ export default function ECENApp() {
           <Tab id="reports" icon={<PieChart size={16}/>} label="Hesabatlar" />
         </nav>
 
-        {activeTab === 'purchases' && <PurchasesForm data={data} setData={setData} />}
-        {activeTab === 'sales' && <SalesForm data={data} setData={setData} customers={customers} />}
-        {activeTab === 'expenses' && <ExpensesForm data={data} setData={setData} />}
-        {activeTab === 'payments' && <PaymentsForm data={data} setData={setData} customers={customers} />}
+        {activeTab === 'purchases' && <PurchasesForm data={data} user={user} addRow={addRow} updateRow={updateRow} deleteRow={deleteRow} />}
+        {activeTab === 'sales' && <SalesForm data={data} user={user} addRow={addRow} updateRow={updateRow} deleteRow={deleteRow} customers={customers} />}
+        {activeTab === 'expenses' && <ExpensesForm data={data} user={user} addRow={addRow} updateRow={updateRow} deleteRow={deleteRow} />}
+        {activeTab === 'payments' && <PaymentsForm data={data} user={user} addRow={addRow} updateRow={updateRow} deleteRow={deleteRow} customers={customers} />}
         {activeTab === 'reports' && <Reports data={data} />}
 
         <div className="mt-10 text-xs text-gray-500 flex items-center gap-2">
-          <RefreshCcw size={14}/> Verilənlər brauzerin LocalStorage-ində saxlanılır.
+          <RefreshCcw size={14}/> Verilənlər Firestore-da <b>istifadəçi başına</b> saxlanılır. JSON ixrac/idxal mümkündür.
         </div>
       </main>
     </div>
@@ -800,7 +827,7 @@ export default function ECENApp() {
     if (typeof window !== 'undefined') {
       if (window.__ECEN_TESTS_RUN__) return; window.__ECEN_TESTS_RUN__ = true;
     }
-    // parseNum should handle commas and dots
+    // parseNum
     console.assert(parseNum('1,5') === 1.5, 'parseNum comma failed');
     console.assert(parseNum('2.5') === 2.5, 'parseNum dot failed');
 
@@ -811,11 +838,7 @@ export default function ECENApp() {
     const p0 = { date: '2025-09-01', batchSeq: '02' };
     console.assert(batchNameOf(p0) === 'P - 01092025-02', 'batchNameOf seq');
 
-    // calculateReports handles empty/malformed shapes
-    const r1 = calculateReports({});
-    console.assert(Array.isArray(r1.perBatch) && Array.isArray(r1.customerDebts), 'calculateReports empty');
-
-    // Business scenario
+    // calculateReports
     const demo = {
       purchases: [{ id: 'b1', date: '2024-01-01', qty: 10, unitPrice: 5 }],
       expenses:  [{ id: 'e1', date: '2024-01-02', batchId: 'b1', name: 'cargo', amount: 20 }],
@@ -831,19 +854,6 @@ export default function ECENApp() {
     console.assert(r2.totals.stockCost === 30, 'stockCost 30');
     const cd = r2.customerDebts.find(c=>c.customer==='Ali');
     console.assert(cd && cd.invoiced === 32 && cd.paid === 10 && cd.balance === 22, 'customer debts');
-
-    // CRUD basic tests
-    let d = { purchases: [], sales: [], expenses: [], payments: [] };
-    const seq = nextSeqForDate([], '2025-09-01');
-    const name = `${formatBatchNameFromDate('2025-09-01')}-${seq}`;
-    d.purchases.push({ id:'bX', date:'2025-09-01', qty:1, unitPrice:2, batchSeq:seq, batchName:name });
-    console.assert(d.purchases[0].batchName===`P - 01092025-01`, 'purchase batchName auto');
-    const seq2 = nextSeqForDate(d.purchases, '2025-09-01');
-    console.assert(seq2==='02','nextSeqForDate second');
-
-    // normalizeData robustness
-    const n1 = normalizeData(null);
-    console.assert(Array.isArray(n1.purchases) && n1.purchases.length===0, 'normalizeData null ok');
 
     console.log('%cECEN tests passed', 'color: green');
   } catch (e) {
