@@ -3,6 +3,24 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers, Pencil, X, Download, Upload } from "lucide-react";
+// Firebase — static modular imports (stable)
+import { initializeApp, getApps, getApp } from "firebase/app";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithRedirect,
+  signInWithPopup,
+  onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  getRedirectResult,
+  signOut as fbSignOut,
+} from "firebase/auth";
+import {
+  getFirestore,
+  collection, query, orderBy, onSnapshot,
+  addDoc, updateDoc, deleteDoc, serverTimestamp, doc
+} from "firebase/firestore";
 
 /*************************
  * Helpers & Formatting  *
@@ -40,114 +58,97 @@ const batchNameOf = (purchase) => {
 /*************************
  * Safe Env Reader        *
  *************************/
-function getFirebaseCfg() {
-  let env = {};
-  try { if (typeof process !== 'undefined' && process && process.env) env = process.env; } catch {}
+function getFirebaseCfg(){
+  // Build-time (Vercel/Next) PUBLIC env-lər
+  const inline = {
+    apiKey: process?.env?.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+    authDomain: process?.env?.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+    projectId: process?.env?.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+    appId: process?.env?.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+    messagingSenderId: process?.env?.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+    storageBucket: process?.env?.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
+    measurementId: process?.env?.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "",
+  };
+  // Fallback — public client config you shared
+  const hardcoded = {
+    apiKey: "AIzaSyCPNxcjU4bBxecm9EUsvRR2dSLpSEfn79I",
+    authDomain: "ecen-7ab2a.firebaseapp.com",
+    projectId: "ecen-7ab2a",
+    storageBucket: "ecen-7ab2a.firebasestorage.app",
+    messagingSenderId: "975942893799",
+    appId: "1:975942893799:web:55f75a66734305e9b06242",
+    measurementId: "G-CPSM1PCS9G",
+  };
   const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
   const web = g.__ECEN_ENV__ || {};
-
   return {
-    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "HARDCODED_KEY",
-    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "HARDCODED_DOMAIN",
-    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "HARDCODED_PROJECT",
-    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "HARDCODED_APPID",
-    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "HARDCODED_MSGID",
+    apiKey: inline.apiKey || web.NEXT_PUBLIC_FIREBASE_API_KEY || hardcoded.apiKey,
+    authDomain: inline.authDomain || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || hardcoded.authDomain,
+    projectId: inline.projectId || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || hardcoded.projectId,
+    appId: inline.appId || web.NEXT_PUBLIC_FIREBASE_APP_ID || hardcoded.appId,
+    messagingSenderId: inline.messagingSenderId || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || hardcoded.messagingSenderId,
+    storageBucket: inline.storageBucket || web.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || hardcoded.storageBucket,
+    measurementId: inline.measurementId || web.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || hardcoded.measurementId,
   };
 }
 
 /*************************
  * Firebase (Auth + DB)  *
  *************************/
-// Dinamik import: paket olmasa (canvas-da) UI sıradan çıxmır. Vercel-də isə env-lər ilə işləyir.
+// Browser-safe singletons
+const G = typeof globalThis !== 'undefined' ? globalThis : window;
+if (!G.__ECEN_FB__) G.__ECEN_FB__ = { app: null, auth: null, db: null };
+const FB = G.__ECEN_FB__;
+
 function useFirebase() {
   const [fb, setFb] = useState({ ready: false, user: null });
+  const [lastError, setLastError] = useState("");
   const ref = React.useRef({});
 
-  useEffect(() => {
-    let unsub = null;
-    (async () => {
-      try {
-        const cfg = getFirebaseCfg();
-        if (!cfg.apiKey) { setFb({ ready:false, user:null }); return; }
-        const appMod = await import('firebase/app');
-        const authMod = await import('firebase/auth');
-        const dbMod = await import('firebase/firestore');
+  const ensure = React.useCallback(async () => {
+    const cfg = getFirebaseCfg();
+    try {
+      if (!FB.app) FB.app = (getApps().length ? getApp() : initializeApp(cfg));
+      if (!FB.auth) FB.auth = getAuth(FB.app);
+      try { await setPersistence(FB.auth, browserLocalPersistence); } catch {}
+      if (!FB.db) FB.db = getFirestore(FB.app);
 
-        const app = appMod.getApps().length ? appMod.getApps()[0] : appMod.initializeApp(cfg);
-const auth = authMod.getAuth(app);
-// Sessiya davamlılığı (mobil/safari daxil olmaqla)
-try { await authMod.setPersistence(auth, authMod.browserLocalPersistence); } catch {}
-// Redirect nəticəsini istehlak et (mobil üçün vacibdir)
-try {
-  const res = await authMod.getRedirectResult(auth);
-  if (res && res.user) {
-    setFb({ ready: true, user: res.user });
-  }
-} catch {}
-// Auth dəyişikliklərini dinlə
-try {
-  authMod.onAuthStateChanged(auth, (u) => {
-    setFb({ ready: true, user: u || null });
-  });
-} catch {}
-try { await authMod.setPersistence(auth, authMod.browserLocalPersistence); } catch {}
-const db = dbMod.getFirestore(app);
+      ref.current = {
+        auth: FB.auth,
+        authMod: { GoogleAuthProvider, signInWithRedirect, signInWithPopup, onAuthStateChanged, setPersistence, browserLocalPersistence, getRedirectResult, signOut: fbSignOut },
+        db: FB.db,
+        dbMod: { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, doc },
+      };
 
-        ref.current = { appMod, authMod, dbMod, app, auth, db };
-        unsub = authMod.onAuthStateChanged(auth, (u)=> setFb({ ready:true, user:u }));
-      } catch (e) {
-        // console.warn('Firebase init skipped', e);
-        setFb({ ready:false, user:null });
-      }
-    })();
-    return () => { try { unsub && unsub(); } catch {} };
+      try { const res = await getRedirectResult(FB.auth); if (res && res.user) { setFb({ ready:true, user: res.user }); } } catch {}
+      try { onAuthStateChanged(FB.auth, (u)=> setFb({ ready:true, user: u || null })); } catch {}
+      return { auth: FB.auth };
+    } catch (e) {
+      setFb({ ready:false, user:null });
+      try { setLastError(String(e?.message || e)); } catch {}
+      throw e;
+    }
   }, []);
 
-  // Firebase init helper — komponent daxilində istifadə olunur
-const ensureFirebase = async () => {
-  const cfg = getFirebaseCfg();
-  try {
-    if (!__fbApp) __fbApp = (getApps().length ? getApp() : initializeApp(cfg));
-    if (!__fbAuth) __fbAuth = getAuth(__fbApp);
-    try { await setPersistence(__fbAuth, browserLocalPersistence); } catch {}
-    if (!__fbDb) __fbDb = getFirestore(__fbApp);
-    // ref.current doldur
-    ref.current = {
-      authMod: { GoogleAuthProvider, signInWithRedirect, signInWithPopup, onAuthStateChanged, setPersistence, browserLocalPersistence, getRedirectResult },
-      auth: __fbAuth,
-    };
-    // auth dəyişiklikləri
-    try { onAuthStateChanged(__fbAuth, (u)=> setFb({ ready:true, user: u || null })); } catch {}
-    // redirect nəticəsini istehlak et
-    try { const res = await getRedirectResult(__fbAuth); if (res && res.user) { setFb({ ready:true, user: res.user }); } } catch {}
-    return { auth: __fbAuth };
-  } catch(e) {
-    try { setLastError(String(e?.message || e)); } catch {}
-    setFb({ ready:true, user:null });
-    throw e;
-  }
-};
+  useEffect(() => { (async()=>{ try { await ensure(); } catch {} })(); }, [ensure]);
 
-const signIn = async () => {
-  try {
-    if (!ref.current?.auth) await ensureFirebase();
-    const { auth } = ref.current || {};
-    const provider = new GoogleAuthProvider();
+  const signIn = async () => {
     try {
-      await signInWithRedirect(auth, provider);
-    } catch (err) {
-      await signInWithPopup(auth, provider);
+      if (!ref.current?.auth) await ensure();
+      const { auth } = ref.current || {};
+      const provider = new GoogleAuthProvider();
+      try { await signInWithRedirect(auth, provider); }
+      catch { await signInWithPopup(auth, provider); }
+    } catch (err2) {
+      try { setLastError(String(err2?.message || err2)); } catch {}
+      alert('Giriş mümkün olmadı. Authorized domains və env dəyərlərini yoxlayın.');
     }
-  } catch (err2) {
-    try { setLastError(String(err2?.message || err2)); } catch {}
-    alert('Giriş mümkün olmadı. Authorized domains və env dəyərlərini yoxlayın.');
-  }
-};
+  };
+
   const signOut = async () => {
     const { authMod, auth } = ref.current; if (!authMod || !auth) return; await authMod.signOut(auth);
   };
 
-  // Firestore helpers
   const colPath = (uid, name) => `users/${uid}/${name}`;
   const subscribeCollection = (uid, name, cb) => {
     const { dbMod, db } = ref.current; if (!dbMod || !db) return () => {};
@@ -171,7 +172,7 @@ const signIn = async () => {
     return dbMod.deleteDoc(d);
   };
 
-  return { ...fb, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow };
+  return { ...fb, lastError, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow };
 }
 
 /***********************
@@ -744,8 +745,6 @@ function Reports({ data }) {
 export default function ECENApp() {
   const fb = useFirebase();
   const { ready, user, lastError, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow } = fb;
-  // Sayfa yüklənəndə Firebase init edin ki, redirect nəticəsi dərhal tanınsın
-  React.useEffect(() => { (async ()=>{ try { await ensureFirebase(); } catch {} })(); }, []);
 
   // Firestore-driven state
   const [data, setData] = useState({ purchases: [], sales: [], expenses: [], payments: [] });
@@ -890,11 +889,12 @@ export default function ECENApp() {
       if (window.__ECEN_TESTS_RUN__) return; window.__ECEN_TESTS_RUN__ = true;
     }
     // parseNum
-    console.assert(parseNum('1,5') === 1.5, 'parseNum comma failed');
-    console.assert(parseNum('2.5') === 2.5, 'parseNum dot failed');
+    console.assert(parseNum("1,5") === 1.5, "parseNum comma failed");
+    console.assert(parseNum("2.5") === 2.5, "parseNum dot failed");
+    console.assert(parseNum("abc") === 0, "parseNum invalid -> 0");
 
     // formatBatchNameFromDate
-    console.assert(formatBatchNameFromDate('2025-09-01') === 'P - 01092025', 'formatBatchNameFromDate ddmmyyyy');
+    console.assert(formatBatchNameFromDate("2025-09-01") === "P - 01092025", "formatBatchNameFromDate ddmmyyyy");
 
     // batchNameOf with seq
     const p0 = { date: '2025-09-01', batchSeq: '02' };
@@ -917,7 +917,7 @@ export default function ECENApp() {
     const cd = r2.customerDebts.find(c=>c.customer==='Ali');
     console.assert(cd && cd.invoiced === 32 && cd.paid === 10 && cd.balance === 22, 'customer debts');
 
-    // NEW: env reader fallback (no process in browser)
+    // getFirebaseCfg global fallback
     const g = (typeof globalThis !== 'undefined' ? globalThis : window);
     const prev = g.__ECEN_ENV__;
     g.__ECEN_ENV__ = { NEXT_PUBLIC_FIREBASE_API_KEY: 'X' };
