@@ -40,41 +40,20 @@ const batchNameOf = (purchase) => {
 /*************************
  * Safe Env Reader        *
  *************************/
-function getFirebaseCfg() {
-  // 1) Vercel/Next.js – build vaxtı inlayn ediləcək PUBLIC env-lər
-  const inline = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
-    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "",
-  };
-
-  // 2) Fallback – sənin verdiyin real Firebase config (prod üçün də təhlükəsizdir; bunlar public client config-dir)
-  const hardcoded = {
-    apiKey: "AIzaSyCPNxcjU4bBxecm9EUsvRR2dSLpSEfn79I",
-    authDomain: "ecen-7ab2a.firebaseapp.com",
-    projectId: "ecen-7ab2a",
-    appId: "1:975942893799:web:55f75a66734305e9b06242",
-    messagingSenderId: "975942893799",
-    storageBucket: "ecen-7ab2a.firebasestorage.app",
-    measurementId: "G-CPSM1PCS9G",
-  };
-
-  // 3) Nəticə – əvvəl env-lər, boşdursa hardcoded
+function getFirebaseCfg(){
+  // Read from process.env if available (Next.js inlines at build time), otherwise from a browser global fallback
+  let env = {};
+  try { if (typeof process !== 'undefined' && process && process.env) env = process.env; } catch {}
+  const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
+  const web = g.__ECEN_ENV__ || {};
   return {
-    apiKey: inline.apiKey || hardcoded.apiKey,
-    authDomain: inline.authDomain || hardcoded.authDomain,
-    projectId: inline.projectId || hardcoded.projectId,
-    appId: inline.appId || hardcoded.appId,
-    messagingSenderId: inline.messagingSenderId || hardcoded.messagingSenderId,
-    storageBucket: inline.storageBucket || hardcoded.storageBucket,
-    measurementId: inline.measurementId || hardcoded.measurementId,
+    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
   };
 }
-
 
 /*************************
  * Firebase (Auth + DB)  *
@@ -96,6 +75,21 @@ function useFirebase() {
 
         const app = appMod.getApps().length ? appMod.getApps()[0] : appMod.initializeApp(cfg);
 const auth = authMod.getAuth(app);
+// Sessiya davamlılığı (mobil/safari daxil olmaqla)
+try { await authMod.setPersistence(auth, authMod.browserLocalPersistence); } catch {}
+// Redirect nəticəsini istehlak et (mobil üçün vacibdir)
+try {
+  const res = await authMod.getRedirectResult(auth);
+  if (res && res.user) {
+    setFb({ ready: true, user: res.user });
+  }
+} catch {}
+// Auth dəyişikliklərini dinlə
+try {
+  authMod.onAuthStateChanged(auth, (u) => {
+    setFb({ ready: true, user: u || null });
+  });
+} catch {}
 try { await authMod.setPersistence(auth, authMod.browserLocalPersistence); } catch {}
 const db = dbMod.getFirestore(app);
 
@@ -817,7 +811,7 @@ export default function ECENApp() {
                 <button onClick={signOut} className="rounded-xl border px-3 py-2 hover:bg-gray-50 shrink-0 whitespace-nowrap">Çıxış</button>
               </div>
             ) : (
-              <button onClick={signIn} className="rounded-xl border px-3 py-2 hover:bg-gray-50 mr-2 shrink-0 whitespace-nowrap">Google ilə giriş</button>
+              <button onClick={signIn} className="rounded-xl px-3 py-2 mr-2 shrink-0 whitespace-nowrap bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600">Google ilə giriş</button>
             )}
 
             <button onClick={exportJSON} className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 shrink-0 whitespace-nowrap"><Download size={16}/> İxrac</button>
