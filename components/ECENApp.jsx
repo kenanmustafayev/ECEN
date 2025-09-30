@@ -58,18 +58,19 @@ const batchNameOf = (purchase) => {
 /*************************
  * Safe Env Reader        *
  *************************/
-function getFirebaseCfg(){
-  // Build-time (Vercel/Next) PUBLIC env-lər
+function getFirebaseCfg() {
+  // Build-time (Vercel) PUBLIC env-lər
   const inline = {
-    apiKey: process?.env?.NEXT_PUBLIC_FIREBASE_API_KEY || "",
-    authDomain: process?.env?.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
-    projectId: process?.env?.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
-    appId: process?.env?.NEXT_PUBLIC_FIREBASE_APP_ID || "",
-    messagingSenderId: process?.env?.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
-    storageBucket: process?.env?.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
-    measurementId: process?.env?.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "",
+    apiKey: (typeof process !== 'undefined' && process?.env?.NEXT_PUBLIC_FIREBASE_API_KEY) || "",
+    authDomain: (typeof process !== 'undefined' && process?.env?.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN) || "",
+    projectId: (typeof process !== 'undefined' && process?.env?.NEXT_PUBLIC_FIREBASE_PROJECT_ID) || "",
+    appId: (typeof process !== 'undefined' && process?.env?.NEXT_PUBLIC_FIREBASE_APP_ID) || "",
+    messagingSenderId: (typeof process !== 'undefined' && process?.env?.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID) || "",
+    storageBucket: (typeof process !== 'undefined' && process?.env?.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) || "",
+    measurementId: (typeof process !== 'undefined' && process?.env?.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID) || "",
   };
-  // Fallback — public client config you shared
+
+  // Sənin verdiyin public config – təhlükəsiz fallback
   const hardcoded = {
     apiKey: "AIzaSyCPNxcjU4bBxecm9EUsvRR2dSLpSEfn79I",
     authDomain: "ecen-7ab2a.firebaseapp.com",
@@ -79,8 +80,10 @@ function getFirebaseCfg(){
     appId: "1:975942893799:web:55f75a66734305e9b06242",
     measurementId: "G-CPSM1PCS9G",
   };
+
   const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
   const web = g.__ECEN_ENV__ || {};
+
   return {
     apiKey: inline.apiKey || web.NEXT_PUBLIC_FIREBASE_API_KEY || hardcoded.apiKey,
     authDomain: inline.authDomain || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || hardcoded.authDomain,
@@ -96,6 +99,12 @@ function getFirebaseCfg(){
  * Firebase (Auth + DB)  *
  *************************/
 // Browser-safe singletons
+
+// Təhlükəsiz singletons — globalThis üzərində saxlayırıq ki, re-init olmasın
+const FB = (typeof globalThis !== 'undefined'
+  ? (globalThis.__ECEN_FB__ ||= { app: null, auth: null, db: null })
+  : { app: null, auth: null, db: null });
+
 const G = typeof globalThis !== 'undefined' ? globalThis : window;
 if (!G.__ECEN_FB__) G.__ECEN_FB__ = { app: null, auth: null, db: null };
 const FB = G.__ECEN_FB__;
@@ -106,11 +115,13 @@ function useFirebase() {
   const ref = React.useRef({});
 
   const ensure = React.useCallback(async () => {
-    const cfg = getFirebaseCfg();
     try {
+      const cfg = getFirebaseCfg();
       if (!FB.app) FB.app = (getApps().length ? getApp() : initializeApp(cfg));
-      if (!FB.auth) FB.auth = getAuth(FB.app);
-      try { await setPersistence(FB.auth, browserLocalPersistence); } catch {}
+      if (!FB.auth) {
+        FB.auth = getAuth(FB.app);
+        try { await setPersistence(FB.auth, browserLocalPersistence); } catch {}
+      }
       if (!FB.db) FB.db = getFirestore(FB.app);
 
       ref.current = {
@@ -120,52 +131,63 @@ function useFirebase() {
         dbMod: { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, doc },
       };
 
-      try { const res = await getRedirectResult(FB.auth); if (res && res.user) { setFb({ ready:true, user: res.user }); } } catch {}
-      try { onAuthStateChanged(FB.auth, (u)=> setFb({ ready:true, user: u || null })); } catch {}
+      try {
+        const res = await getRedirectResult(FB.auth);
+        if (res?.user) setFb({ ready: true, user: res.user });
+      } catch {}
+
+      onAuthStateChanged(FB.auth, (u) => setFb({ ready: true, user: u || null }));
       return { auth: FB.auth };
     } catch (e) {
-      setFb({ ready:false, user:null });
-      try { setLastError(String(e?.message || e)); } catch {}
+      setFb({ ready: false, user: null });
+      setLastError(String(e?.message || e));
       throw e;
     }
   }, []);
 
-  useEffect(() => { (async()=>{ try { await ensure(); } catch {} })(); }, [ensure]);
+ 
 
   const signIn = async () => {
     try {
       if (!ref.current?.auth) await ensure();
       const { auth } = ref.current || {};
       const provider = new GoogleAuthProvider();
-      try { await signInWithRedirect(auth, provider); }
-      catch { await signInWithPopup(auth, provider); }
+      // Popup daha çox brauzerdə işləyir; uğursuz olsa redirect
+      try { await signInWithPopup(auth, provider); }
+      catch { await signInWithRedirect(auth, provider); }
     } catch (err2) {
-      try { setLastError(String(err2?.message || err2)); } catch {}
+      setLastError(String(err2?.message || err2));
       alert('Giriş mümkün olmadı. Authorized domains və env dəyərlərini yoxlayın.');
     }
   };
 
   const signOut = async () => {
-    const { authMod, auth } = ref.current; if (!authMod || !auth) return; await authMod.signOut(auth);
+    const { authMod, auth } = ref.current;
+    if (!authMod || !auth) return;
+    await authMod.signOut(auth);
   };
 
   const colPath = (uid, name) => `users/${uid}/${name}`;
+
   const subscribeCollection = (uid, name, cb) => {
     const { dbMod, db } = ref.current; if (!dbMod || !db) return () => {};
     const c = dbMod.collection(db, colPath(uid, name));
     const q = dbMod.query(c, dbMod.orderBy('date','asc'));
     return dbMod.onSnapshot(q, (snap)=> cb(snap.docs.map(d=>({ id: d.id, ...d.data() }))));
   };
+
   const addRow = (uid, name, payload) => {
     const { dbMod, db } = ref.current; if (!dbMod || !db) throw new Error('DB not ready');
     const c = dbMod.collection(db, colPath(uid, name));
     return dbMod.addDoc(c, { ...payload, createdAt: dbMod.serverTimestamp() });
   };
+
   const updateRow = (uid, name, id, patch) => {
     const { dbMod, db } = ref.current; if (!dbMod || !db) throw new Error('DB not ready');
     const d = dbMod.doc(db, `${colPath(uid,name)}/${id}`);
     return dbMod.updateDoc(d, { ...patch, updatedAt: dbMod.serverTimestamp() });
   };
+
   const deleteRow = (uid, name, id) => {
     const { dbMod, db } = ref.current; if (!dbMod || !db) throw new Error('DB not ready');
     const d = dbMod.doc(db, `${colPath(uid,name)}/${id}`);
