@@ -76,27 +76,14 @@ function useFirebase() {
     return () => { try { unsub && unsub(); } catch {} };
   }, []);
 
-const signIn = async () => {
-  const { authMod, auth } = ref.current;
-  if (!authMod || !auth) {
-    alert('Firebase konfiqurasiya edilməyib. Vercel Environment Variables yoxlayın.');
-    return;
-  }
-  try {
+  const signIn = async () => {
+    const { authMod, auth } = ref.current; if (!authMod || !auth) return alert('Firebase konfiqurasiya edilməyib.');
     const provider = new authMod.GoogleAuthProvider();
-    // Popup-u yoxla
     await authMod.signInWithPopup(auth, provider);
-  } catch (err) {
-    // Popup bloklandısa və ya icazə problemi varsa — redirect ilə cəhd et
-    try {
-      const provider = new authMod.GoogleAuthProvider();
-      await authMod.signInWithRedirect(auth, provider);
-    } catch (err2) {
-      console.error('Sign-in failed', err, err2);
-      alert('Giriş mümkün olmadı. Authorized Domains və env dəyərlərini yoxlayın.');
-    }
-  }
-};
+  };
+  const signOut = async () => {
+    const { authMod, auth } = ref.current; if (!authMod || !auth) return; await authMod.signOut(auth);
+  };
 
   // Firestore helpers
   const colPath = (uid, name) => `users/${uid}/${name}`;
