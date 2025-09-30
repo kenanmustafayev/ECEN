@@ -40,38 +40,18 @@ const batchNameOf = (purchase) => {
 /*************************
  * Safe Env Reader        *
  *************************/
-function getFirebaseCfg() {
-  // 1) Vercel/Next.js – build vaxtı inlayn ediləcək PUBLIC env-lər
-  const inline = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
-    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "",
-  };
-
-  // 2) Fallback – sənin verdiyin real Firebase config (prod üçün də təhlükəsizdir; bunlar public client config-dir)
-  const hardcoded = {
-    apiKey: "AIzaSyCPNxcjU4bBxecm9EUsvRR2dSLpSEfn79I",
-    authDomain: "ecen-7ab2a.firebaseapp.com",
-    projectId: "ecen-7ab2a",
-    appId: "1:975942893799:web:55f75a66734305e9b06242",
-    messagingSenderId: "975942893799",
-    storageBucket: "ecen-7ab2a.firebasestorage.app",
-    measurementId: "G-CPSM1PCS9G",
-  };
-
-  // 3) Nəticə – əvvəl env-lər, boşdursa hardcoded
+function getFirebaseCfg(){
+  // Read from process.env if available (Next.js inlines at build time), otherwise from a browser global fallback
+  let env = {};
+  try { if (typeof process !== 'undefined' && process && process.env) env = process.env; } catch {}
+  const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
+  const web = g.__ECEN_ENV__ || {};
   return {
-    apiKey: inline.apiKey || hardcoded.apiKey,
-    authDomain: inline.authDomain || hardcoded.authDomain,
-    projectId: inline.projectId || hardcoded.projectId,
-    appId: inline.appId || hardcoded.appId,
-    messagingSenderId: inline.messagingSenderId || hardcoded.messagingSenderId,
-    storageBucket: inline.storageBucket || hardcoded.storageBucket,
-    measurementId: inline.measurementId || hardcoded.measurementId,
+    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
   };
 }
 
@@ -123,24 +103,46 @@ const db = dbMod.getFirestore(app);
     return () => { try { unsub && unsub(); } catch {} };
   }, []);
 
-  const signIn = async () => {
-    const { authMod, auth } = ref.current;
-    if (!authMod || !auth) return alert('Firebase konfiqurasiya edilməyib. Env dəyərlərini və Authorized Domains-i yoxlayın.');
+  // Firebase init helper — komponent daxilində istifadə olunur
+const ensureFirebase = async () => {
+  const cfg = getFirebaseCfg();
+  try {
+    if (!__fbApp) __fbApp = (getApps().length ? getApp() : initializeApp(cfg));
+    if (!__fbAuth) __fbAuth = getAuth(__fbApp);
+    try { await setPersistence(__fbAuth, browserLocalPersistence); } catch {}
+    if (!__fbDb) __fbDb = getFirestore(__fbApp);
+    // ref.current doldur
+    ref.current = {
+      authMod: { GoogleAuthProvider, signInWithRedirect, signInWithPopup, onAuthStateChanged, setPersistence, browserLocalPersistence, getRedirectResult },
+      auth: __fbAuth,
+    };
+    // auth dəyişiklikləri
+    try { onAuthStateChanged(__fbAuth, (u)=> setFb({ ready:true, user: u || null })); } catch {}
+    // redirect nəticəsini istehlak et
+    try { const res = await getRedirectResult(__fbAuth); if (res && res.user) { setFb({ ready:true, user: res.user }); } } catch {}
+    return { auth: __fbAuth };
+  } catch(e) {
+    try { setLastError(String(e?.message || e)); } catch {}
+    setFb({ ready:true, user:null });
+    throw e;
+  }
+};
+
+const signIn = async () => {
+  try {
+    if (!ref.current?.auth) await ensureFirebase();
+    const { auth } = ref.current || {};
+    const provider = new GoogleAuthProvider();
     try {
-      const provider = new authMod.GoogleAuthProvider();
-      // Daha etibarlı: mobil/iOS və popup bloklanan mühitlər üçün redirect üstünlük verilir
-      await authMod.setPersistence(auth, authMod.browserLocalPersistence);
-      await authMod.signInWithRedirect(auth, provider);
+      await signInWithRedirect(auth, provider);
     } catch (err) {
-      try {
-        const provider = new authMod.GoogleAuthProvider();
-        await authMod.signInWithPopup(auth, provider);
-      } catch (err2) {
-        console.error('Sign-in failed', err, err2);
-        alert('Giriş mümkün olmadı. Firebase Auth → Authorized domains və Vercel env dəyərlərini yenidən yoxlayın.');
-      }
+      await signInWithPopup(auth, provider);
     }
-  };
+  } catch (err2) {
+    try { setLastError(String(err2?.message || err2)); } catch {}
+    alert('Giriş mümkün olmadı. Authorized domains və env dəyərlərini yoxlayın.');
+  }
+};
   const signOut = async () => {
     const { authMod, auth } = ref.current; if (!authMod || !auth) return; await authMod.signOut(auth);
   };
@@ -741,7 +743,9 @@ function Reports({ data }) {
  ****************/
 export default function ECENApp() {
   const fb = useFirebase();
-  const { ready, user, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow } = fb;
+  const { ready, user, lastError, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow } = fb;
+  // Sayfa yüklənəndə Firebase init edin ki, redirect nəticəsi dərhal tanınsın
+  React.useEffect(() => { (async ()=>{ try { await ensureFirebase(); } catch {} })(); }, []);
 
   // Firestore-driven state
   const [data, setData] = useState({ purchases: [], sales: [], expenses: [], payments: [] });
@@ -821,7 +825,7 @@ export default function ECENApp() {
             </motion.div>
             <div>
               <div className="text-xl font-bold whitespace-nowrap">ECEN</div>
-              <div className="text-xs text-gray-500">Created by Apeyron Rock</div>
+              <div className="text-xs text-gray-500">Partiya üzrə maya, gəlir, xərc və borclar</div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 justify-end max-w-full">{/* Auth */}
