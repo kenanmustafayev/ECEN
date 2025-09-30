@@ -74,8 +74,9 @@ function useFirebase() {
         const dbMod = await import('firebase/firestore');
 
         const app = appMod.getApps().length ? appMod.getApps()[0] : appMod.initializeApp(cfg);
-        const auth = authMod.getAuth(app);
-        const db = dbMod.getFirestore(app);
+const auth = authMod.getAuth(app);
+try { await authMod.setPersistence(auth, authMod.browserLocalPersistence); } catch {}
+const db = dbMod.getFirestore(app);
 
         ref.current = { appMod, authMod, dbMod, app, auth, db };
         unsub = authMod.onAuthStateChanged(auth, (u)=> setFb({ ready:true, user:u }));
@@ -92,14 +93,16 @@ function useFirebase() {
     if (!authMod || !auth) return alert('Firebase konfiqurasiya edilməyib. Env dəyərlərini və Authorized Domains-i yoxlayın.');
     try {
       const provider = new authMod.GoogleAuthProvider();
-      await authMod.signInWithPopup(auth, provider);
+      // Daha etibarlı: mobil/iOS və popup bloklanan mühitlər üçün redirect üstünlük verilir
+      await authMod.setPersistence(auth, authMod.browserLocalPersistence);
+      await authMod.signInWithRedirect(auth, provider);
     } catch (err) {
       try {
         const provider = new authMod.GoogleAuthProvider();
-        await authMod.signInWithRedirect(auth, provider);
+        await authMod.signInWithPopup(auth, provider);
       } catch (err2) {
         console.error('Sign-in failed', err, err2);
-        alert('Giriş mümkün olmadı. Authorized Domains və env dəyərlərini yoxlayın.');
+        alert('Giriş mümkün olmadı. Firebase Auth → Authorized domains və Vercel env dəyərlərini yenidən yoxlayın.');
       }
     }
   };
