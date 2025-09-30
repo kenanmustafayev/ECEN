@@ -38,17 +38,27 @@ const batchNameOf = (purchase) => {
 };
 
 /*************************
+ * Safe Env Reader        *
+ *************************/
+function getFirebaseCfg(){
+  // Read from process.env if available (Next.js inlines at build time), otherwise from a browser global fallback
+  let env = {};
+  try { if (typeof process !== 'undefined' && process && process.env) env = process.env; } catch {}
+  const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
+  const web = g.__ECEN_ENV__ || {};
+  return {
+    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+  };
+}
+
+/*************************
  * Firebase (Auth + DB)  *
  *************************/
 // Dinamik import: paket olmasa (canvas-da) UI sıradan çıxmır. Vercel-də isə env-lər ilə işləyir.
-const firebaseCfg = {
-  apiKey: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_API_KEY : undefined,
-  authDomain: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN : undefined,
-  projectId: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_PROJECT_ID : undefined,
-  appId: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_APP_ID : undefined,
-  messagingSenderId: typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID : undefined,
-};
-
 function useFirebase() {
   const [fb, setFb] = useState({ ready: false, user: null });
   const ref = React.useRef({});
@@ -57,12 +67,13 @@ function useFirebase() {
     let unsub = null;
     (async () => {
       try {
-        if (!firebaseCfg.apiKey) { setFb({ ready:false, user:null }); return; }
+        const cfg = getFirebaseCfg();
+        if (!cfg.apiKey) { setFb({ ready:false, user:null }); return; }
         const appMod = await import('firebase/app');
         const authMod = await import('firebase/auth');
         const dbMod = await import('firebase/firestore');
 
-        const app = appMod.getApps().length ? appMod.getApps()[0] : appMod.initializeApp(firebaseCfg);
+        const app = appMod.getApps().length ? appMod.getApps()[0] : appMod.initializeApp(cfg);
         const auth = authMod.getAuth(app);
         const db = dbMod.getFirestore(app);
 
@@ -77,9 +88,20 @@ function useFirebase() {
   }, []);
 
   const signIn = async () => {
-    const { authMod, auth } = ref.current; if (!authMod || !auth) return alert('Firebase konfiqurasiya edilməyib.');
-    const provider = new authMod.GoogleAuthProvider();
-    await authMod.signInWithPopup(auth, provider);
+    const { authMod, auth } = ref.current;
+    if (!authMod || !auth) return alert('Firebase konfiqurasiya edilməyib. Env dəyərlərini və Authorized Domains-i yoxlayın.');
+    try {
+      const provider = new authMod.GoogleAuthProvider();
+      await authMod.signInWithPopup(auth, provider);
+    } catch (err) {
+      try {
+        const provider = new authMod.GoogleAuthProvider();
+        await authMod.signInWithRedirect(auth, provider);
+      } catch (err2) {
+        console.error('Sign-in failed', err, err2);
+        alert('Giriş mümkün olmadı. Authorized Domains və env dəyərlərini yoxlayın.');
+      }
+    }
   };
   const signOut = async () => {
     const { authMod, auth } = ref.current; if (!authMod || !auth) return; await authMod.signOut(auth);
@@ -854,6 +876,14 @@ export default function ECENApp() {
     console.assert(r2.totals.stockCost === 30, 'stockCost 30');
     const cd = r2.customerDebts.find(c=>c.customer==='Ali');
     console.assert(cd && cd.invoiced === 32 && cd.paid === 10 && cd.balance === 22, 'customer debts');
+
+    // NEW: env reader fallback (no process in browser)
+    const g = (typeof globalThis !== 'undefined' ? globalThis : window);
+    const prev = g.__ECEN_ENV__;
+    g.__ECEN_ENV__ = { NEXT_PUBLIC_FIREBASE_API_KEY: 'X' };
+    const cfg = getFirebaseCfg();
+    console.assert(cfg.apiKey === 'X', 'getFirebaseCfg global fallback');
+    g.__ECEN_ENV__ = prev;
 
     console.log('%cECEN tests passed', 'color: green');
   } catch (e) {
