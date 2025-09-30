@@ -40,23 +40,18 @@ const batchNameOf = (purchase) => {
 /*************************
  * Safe Env Reader        *
  *************************/
-function getFirebaseCfg() {
-  // 1) Next.js build-time inline (PROD/Vercel)
-  const INLINE_API_KEY        = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-  const INLINE_AUTH_DOMAIN    = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
-  const INLINE_PROJECT_ID     = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-  const INLINE_APP_ID         = process.env.NEXT_PUBLIC_FIREBASE_APP_ID;
-  const INLINE_MSG_SENDER_ID  = process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID;
-
-  // 2) Canvas/Sandbox üçün brauzer fallback (istəsən konsolda təyin edə bilərsən)
-  const web = (typeof globalThis !== 'undefined' && globalThis.__ECEN_ENV__) || {};
-
+function getFirebaseCfg(){
+  // Read from process.env if available (Next.js inlines at build time), otherwise from a browser global fallback
+  let env = {};
+  try { if (typeof process !== 'undefined' && process && process.env) env = process.env; } catch {}
+  const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
+  const web = g.__ECEN_ENV__ || {};
   return {
-    apiKey:        INLINE_API_KEY       || web.NEXT_PUBLIC_FIREBASE_API_KEY        || "",
-    authDomain:    INLINE_AUTH_DOMAIN   || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN    || "",
-    projectId:     INLINE_PROJECT_ID    || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID     || "",
-    appId:         INLINE_APP_ID        || web.NEXT_PUBLIC_FIREBASE_APP_ID         || "",
-    messagingSenderId: INLINE_MSG_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
   };
 }
 
@@ -801,9 +796,7 @@ export default function ECENApp() {
                 <button onClick={signOut} className="rounded-xl border px-3 py-2 hover:bg-gray-50 shrink-0 whitespace-nowrap">Çıxış</button>
               </div>
             ) : (
-              <button onClick={signIn} className="rounded-xl border px-3 py-2 hover:bg-gray-50 mr-2 shrink-0 whitespace-nowrap" disabled={!ready} title={ready? 'Google ilə giriş' : 'Firebase konfiqurasiya tələb olunur'}>
-                Google ilə giriş
-              </button>
+              <button onClick={signIn} className="rounded-xl border px-3 py-2 hover:bg-gray-50 mr-2 shrink-0 whitespace-nowrap">Google ilə giriş</button>
             )}
 
             <button onClick={exportJSON} className="flex items-center gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 shrink-0 whitespace-nowrap"><Download size={16}/> İxrac</button>
