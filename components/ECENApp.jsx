@@ -40,18 +40,18 @@ const batchNameOf = (purchase) => {
 /*************************
  * Safe Env Reader        *
  *************************/
-function getFirebaseCfg(){
-  // Read from process.env if available (Next.js inlines at build time), otherwise from a browser global fallback
+function getFirebaseCfg() {
   let env = {};
   try { if (typeof process !== 'undefined' && process && process.env) env = process.env; } catch {}
   const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
   const web = g.__ECEN_ENV__ || {};
+
   return {
-    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "",
-    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
-    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
-    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "",
-    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "HARDCODED_KEY",
+    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "HARDCODED_DOMAIN",
+    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "HARDCODED_PROJECT",
+    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "HARDCODED_APPID",
+    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "HARDCODED_MSGID",
   };
 }
 
