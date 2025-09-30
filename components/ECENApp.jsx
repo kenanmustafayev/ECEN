@@ -40,20 +40,41 @@ const batchNameOf = (purchase) => {
 /*************************
  * Safe Env Reader        *
  *************************/
-function getFirebaseCfg(){
-  // Read from process.env if available (Next.js inlines at build time), otherwise from a browser global fallback
-  let env = {};
-  try { if (typeof process !== 'undefined' && process && process.env) env = process.env; } catch {}
-  const g = (typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {}));
-  const web = g.__ECEN_ENV__ || {};
+function getFirebaseCfg() {
+  // 1) Vercel/Next.js – build vaxtı inlayn ediləcək PUBLIC env-lər
+  const inline = {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
+    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || "",
+  };
+
+  // 2) Fallback – sənin verdiyin real Firebase config (prod üçün də təhlükəsizdir; bunlar public client config-dir)
+  const hardcoded = {
+    apiKey: "AIzaSyCPNxcjU4bBxecm9EUsvRR2dSLpSEfn79I",
+    authDomain: "ecen-7ab2a.firebaseapp.com",
+    projectId: "ecen-7ab2a",
+    appId: "1:975942893799:web:55f75a66734305e9b06242",
+    messagingSenderId: "975942893799",
+    storageBucket: "ecen-7ab2a.firebasestorage.app",
+    measurementId: "G-CPSM1PCS9G",
+  };
+
+  // 3) Nəticə – əvvəl env-lər, boşdursa hardcoded
   return {
-    apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || web.NEXT_PUBLIC_FIREBASE_API_KEY || "",
-    authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || web.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
-    projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || web.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
-    appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || web.NEXT_PUBLIC_FIREBASE_APP_ID || "",
-    messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || web.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+    apiKey: inline.apiKey || hardcoded.apiKey,
+    authDomain: inline.authDomain || hardcoded.authDomain,
+    projectId: inline.projectId || hardcoded.projectId,
+    appId: inline.appId || hardcoded.appId,
+    messagingSenderId: inline.messagingSenderId || hardcoded.messagingSenderId,
+    storageBucket: inline.storageBucket || hardcoded.storageBucket,
+    measurementId: inline.measurementId || hardcoded.measurementId,
   };
 }
+
 
 /*************************
  * Firebase (Auth + DB)  *
