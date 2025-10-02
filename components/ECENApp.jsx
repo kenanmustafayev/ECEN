@@ -829,15 +829,11 @@ function Tab({ id, icon, label }) {
   return (
     <button
       type="button"
-      onClick={() => setActiveTab(id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          setActiveTab(id);
-        }
+      onClick={(e) => {
+        e.preventDefault(); // form içindədirsə submit olmasın
+        setActiveTab(id);
       }}
-      aria-pressed={isActive}
-      className={`pointer-events-auto flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 ${
+      className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
         isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"
       }`}
     >
@@ -846,6 +842,7 @@ function Tab({ id, icon, label }) {
     </button>
   );
 }
+
 
 
   return (
