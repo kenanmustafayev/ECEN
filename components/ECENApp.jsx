@@ -865,7 +865,7 @@ export default function ECENApp() {
             </motion.div>
             <div>
               <div className="text-xl font-bold whitespace-nowrap">ECEN</div>
-              <div className="text-xs text-gray-500">Partiya üzrə maya, gəlir, xərc və borclar</div>
+              <div className="text-xs text-gray-500">Created by Apeyron Rock</div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 justify-end max-w-full">{/* Auth */}
