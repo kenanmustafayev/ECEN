@@ -195,6 +195,10 @@ function useFirebase() {
   return { ...fb, lastError, signIn, signOut, subscribeCollection, addRow, updateRow, deleteRow };
 }
 
+
+
+
+
 /***********************
  * Derived & Reporting  *
  ***********************/
@@ -825,11 +829,11 @@ export default function ECENApp() {
   }
 
 function Tab({ id, icon, label }) {
-  const isActive = activeTab === id; // activeTab-a birbaşa erişir
+  const isActive = activeTab === id;
   return (
     <button
       type="button"
-      onClick={() => setActiveTab(id)} // setActiveTab-a birbaşa erişir
+      onClick={() => setActiveTab(id)} // Daha qısa
       className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
         isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"
       }`}
