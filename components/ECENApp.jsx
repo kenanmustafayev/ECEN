@@ -763,6 +763,29 @@ function Reports({ data }) {
   );
 }
 
+function Tab({ id, icon, label, activeTab, setActiveTab }) {
+  const isActive = activeTab === id;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        // e.preventDefault() bəzən mobil brauzerlərdə lazım olur,
+        // ona görə də onu təhlükəsizlik üçün saxlaya bilərik.
+        e.preventDefault(); 
+        setActiveTab(id);
+      }}
+      className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
+        isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"
+      }`}
+    >
+      {icon}
+      <span className="text-sm">{label}</span>
+    </button>
+  );
+}
+
+
+
 /****************
  * App Shell     *
  ****************/
@@ -828,24 +851,6 @@ export default function ECENApp() {
     }
   }
 
-function Tab({ id, icon, label }) {
-  const isActive = activeTab === id;
-  return (
-    <button
-      type="button"
-      onClick={(e) => { // <-- Hadisə (event) obyektini qəbul edirik
-        e.preventDefault(); // <-- Klikin standart davranışını (məsələn: form submit) ləğv edirik
-        setActiveTab(id);
-      }}
-      className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
-        isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"
-      }`}
-    >
-      {icon}
-      <span className="text-sm">{label}</span>
-    </button>
-  );
-}
 
 
 
@@ -894,13 +899,43 @@ function Tab({ id, icon, label }) {
             Xahiş olunur <b>Google ilə giriş</b> edin – məlumatlarınız Firestore-da istifadəçi hesabınız üzrə saxlanılacaq.
           </div>
         )}
-        <nav className="mb-6 flex flex-wrap gap-2">
-          <Tab id="purchases" icon={<Package size={16}/>} label="Alışlar" />
-          <Tab id="sales" icon={<Users size={16}/>} label="Satışlar" />
-          <Tab id="expenses" icon={<Receipt size={16}/>} label="Xərclər" />
-          <Tab id="payments" icon={<DollarSign size={16}/>} label="Ödənişlər" />
-          <Tab id="reports" icon={<PieChart size={16}/>} label="Hesabatlar" />
-        </nav>
+<nav className="mb-6 flex flex-wrap gap-2">
+  <Tab 
+    id="purchases" 
+    icon={<Package size={16}/>} 
+    label="Alışlar"
+    activeTab={activeTab} // <-- Əlavə edildi
+    setActiveTab={setActiveTab} // <-- Əlavə edildi
+  />
+  <Tab 
+    id="sales" 
+    icon={<Users size={16}/>} 
+    label="Satışlar" 
+    activeTab={activeTab} // <-- Əlavə edildi
+    setActiveTab={setActiveTab} // <-- Əlavə edildi
+  />
+  <Tab 
+    id="expenses" 
+    icon={<Receipt size={16}/>} 
+    label="Xərclər" 
+    activeTab={activeTab} // <-- Əlavə edildi
+    setActiveTab={setActiveTab} // <-- Əlavə edildi
+  />
+  <Tab 
+    id="payments" 
+    icon={<DollarSign size={16}/>} 
+    label="Ödənişlər" 
+    activeTab={activeTab} // <-- Əlavə edildi
+    setActiveTab={setActiveTab} // <-- Əlavə edildi
+  />
+  <Tab 
+    id="reports" 
+    icon={<PieChart size={16}/>} 
+    label="Hesabatlar" 
+    activeTab={activeTab} // <-- Əlavə edildi
+    setActiveTab={setActiveTab} // <-- Əlavə edildi
+  />
+</nav>
 
         {activeTab === 'purchases' && <PurchasesForm data={data} user={user} addRow={addRow} updateRow={updateRow} deleteRow={deleteRow} />}
         {activeTab === 'sales' && <SalesForm data={data} user={user} addRow={addRow} updateRow={updateRow} deleteRow={deleteRow} customers={customers} />}
