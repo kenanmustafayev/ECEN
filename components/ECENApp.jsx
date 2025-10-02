@@ -6,16 +6,21 @@ import { Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, R
 // Firebase — static modular imports (stable)
 import { initializeApp, getApps, getApp } from "firebase/app";
 import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithRedirect,
-  signInWithPopup,
-  onAuthStateChanged,
-  setPersistence,
-  browserLocalPersistence,
-  getRedirectResult,
-  signOut as fbSignOut,
-} from "firebase/auth";
++  getAuth,
++  initializeAuth,
++  GoogleAuthProvider,
++  signInWithRedirect,
++  signInWithPopup,
++  onAuthStateChanged,
++  setPersistence,
++  browserLocalPersistence,
++  indexedDBLocalPersistence,
++  inMemoryPersistence,
++  getRedirectResult,
++  signOut as fbSignOut,
++} from "firebase/auth";
+
+import { Trash2, PlusCircle, RefreshCcw, PieChart, Package, Users, DollarSign, Receipt, Layers, Pencil, X, Download, Upload, LogIn, LogOut } from "lucide-react";
 import {
   getFirestore,
   collection, query, orderBy, onSnapshot,
@@ -106,43 +111,66 @@ function useFirebase() {
   const [lastError, setLastError] = useState("");
   const ref = React.useRef({});
 
-  const ensure = React.useCallback(async () => {
-    try {
-      const cfg = getFirebaseCfg();
-      if (!FB.app) FB.app = (getApps().length ? getApp() : initializeApp(cfg));
-      if (!FB.auth) {
-        FB.auth = getAuth(FB.app);
-        try { await setPersistence(FB.auth, browserLocalPersistence); } catch {}
-      }
-      if (!FB.db) FB.db = getFirestore(FB.app);
-
-      ref.current = {
-        auth: FB.auth,
-        authMod: { GoogleAuthProvider, signInWithRedirect, signInWithPopup, onAuthStateChanged, setPersistence, browserLocalPersistence, getRedirectResult, signOut: fbSignOut },
-        db: FB.db,
-        dbMod: { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, doc },
-      };
-
-      // 1) Əvvəlcə auth state listener — redirect-dən qayıdanda dərhal user gəlsin
-      onAuthStateChanged(FB.auth, (u)=> {
-        setFb((prev)=> ({ ready: true, user: u || null }));
-      });
-
-      // 2) Redirect nəticəsini oxu (əgər istifadə olunubsa)
-      try {
-        const res = await getRedirectResult(FB.auth);
-        if (res?.user) setFb({ ready: true, user: res.user });
-      } catch {}
-
-      // ready flag — heç olmasa init tamamlandı
-      setFb((prev)=> ({ ready: true, user: prev.user }));
-      return { auth: FB.auth };
-    } catch (e) {
-      setFb({ ready: false, user: null });
-      setLastError(String(e?.message || e));
-      throw e;
+const ensure = React.useCallback(async () => {
+  try {
+    const cfg = getFirebaseCfg();
+    if (!FB.app) {
+      FB.app = (getApps().length ? getApp() : initializeApp(cfg));
     }
-  }, []);
+    if (!FB.auth) {
+      try {
+        FB.auth = initializeAuth(FB.app, { persistence: indexedDBLocalPersistence });
+      } catch {
+        try {
+          FB.auth = initializeAuth(FB.app, { persistence: browserLocalPersistence });
+        } catch {
+          FB.auth = getAuth(FB.app);
+          try { await setPersistence(FB.auth, inMemoryPersistence); } catch {}
+        }
+      }
+      try { await setPersistence(FB.auth, indexedDBLocalPersistence); }
+      catch {
+        try { await setPersistence(FB.auth, browserLocalPersistence); }
+        catch { try { await setPersistence(FB.auth, inMemoryPersistence); } catch {} }
+      }
+    }
+
+    if (!FB.db) FB.db = getFirestore(FB.app);
+
+    ref.current = {
+      auth: FB.auth,
+      authMod: { GoogleAuthProvider, signInWithRedirect, signInWithPopup, onAuthStateChanged, setPersistence, browserLocalPersistence, getRedirectResult, signOut: fbSignOut },
+      db: FB.db,
+      dbMod: { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, doc },
+    };
+
+    onAuthStateChanged(FB.auth, (u) => {
+      setFb({ ready: true, user: u || null });
+    });
+    try {
+      const res = await getRedirectResult(FB.auth);
+      if (res?.user) setFb({ ready: true, user: res.user });
+    } catch {}
+    try {
+      if (typeof FB.auth.authStateReady === "function") {
+        await FB.auth.authStateReady();
+        setFb((prev) => ({ ready: true, user: prev.user ?? FB.auth.currentUser ?? null }));
+      }
+    } catch {}
+    if (!FB.auth.currentUser) {
+      setFb((prev) => ({ ready: true, user: prev.user ?? null }));
+    } else {
+      setFb({ ready: true, user: FB.auth.currentUser });
+    }
+
+    return { auth: FB.auth };
+  } catch (e) {
+    setFb({ ready: false, user: null });
+    setLastError(String(e?.message || e));
+    throw e;
+  }
+}, []);
+
 
   useEffect(() => { (async () => { try { await ensure(); } catch {} })(); }, [ensure]);
 
@@ -763,17 +791,17 @@ function Reports({ data }) {
   );
 }
 
-function Tab({ id, icon, label, activeTab, setActiveTab }) {
+function Tab({ id, icon, label }) {
   const isActive = activeTab === id;
   return (
     <button
       type="button"
-      onClick={(e) => {
-        // e.preventDefault() bəzən mobil brauzerlərdə lazım olur,
-        // ona görə də onu təhlükəsizlik üçün saxlaya bilərik.
-        e.preventDefault(); 
-        setActiveTab(id);
-      }}
+      onClick={(e) => { e.preventDefault(); setActiveTab(id); }}
+      onPointerDown={(e) => { e.preventDefault(); setActiveTab(id); }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(id); } }}
+      aria-pressed={isActive}
+      aria-current={isActive ? "page" : undefined}
+      disabled={isActive}
       className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
         isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"
       }`}
@@ -783,7 +811,6 @@ function Tab({ id, icon, label, activeTab, setActiveTab }) {
     </button>
   );
 }
-
 
 
 /****************
