@@ -825,14 +825,11 @@ export default function ECENApp() {
   }
 
 function Tab({ id, icon, label }) {
-  const isActive = activeTab === id;
+  const isActive = activeTab === id; // activeTab-a birbaşa erişir
   return (
     <button
       type="button"
-      onClick={(e) => {
-        //e.preventDefault(); // form içindədirsə submit olmasın
-        setActiveTab(id);
-      }}
+      onClick={() => setActiveTab(id)} // setActiveTab-a birbaşa erişir
       className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
         isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"
       }`}
@@ -842,6 +839,17 @@ function Tab({ id, icon, label }) {
     </button>
   );
 }
+
+// ... və aşağıda nav hissəsi olduğu kimi qalır:
+// ...
+<nav className="mb-6 flex flex-wrap gap-2">
+  <Tab id="purchases" icon={<Package size={16}/>} label="Alışlar" />
+  <Tab id="sales" icon={<Users size={16}/>} label="Satışlar" />
+  <Tab id="expenses" icon={<Receipt size={16}/>} label="Xərclər" />
+  <Tab id="payments" icon={<DollarSign size={16}/>} label="Ödənişlər" />
+  <Tab id="reports" icon={<PieChart size={16}/>} label="Hesabatlar" />
+</nav>
+// ...
 
 
 
