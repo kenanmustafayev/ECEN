@@ -107,11 +107,13 @@ function useFirebase() {
   const ref = React.useRef({});
 
   const ensure = React.useCallback(async () => {
-    const cfg = getFirebaseCfg();
     try {
+      const cfg = getFirebaseCfg();
       if (!FB.app) FB.app = (getApps().length ? getApp() : initializeApp(cfg));
-      if (!FB.auth) FB.auth = getAuth(FB.app);
-      try { await setPersistence(FB.auth, browserLocalPersistence); } catch {}
+      if (!FB.auth) {
+        FB.auth = getAuth(FB.app);
+        try { await setPersistence(FB.auth, browserLocalPersistence); } catch {}
+      }
       if (!FB.db) FB.db = getFirestore(FB.app);
 
       ref.current = {
@@ -121,27 +123,44 @@ function useFirebase() {
         dbMod: { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, doc },
       };
 
-      try { const res = await getRedirectResult(FB.auth); if (res && res.user) { setFb({ ready:true, user: res.user }); } } catch {}
-      try { onAuthStateChanged(FB.auth, (u)=> setFb({ ready:true, user: u || null })); } catch {}
+      // 1) Əvvəlcə auth state listener — redirect-dən qayıdanda dərhal user gəlsin
+      onAuthStateChanged(FB.auth, (u)=> {
+        setFb((prev)=> ({ ready: true, user: u || null }));
+      });
+
+      // 2) Redirect nəticəsini oxu (əgər istifadə olunubsa)
+      try {
+        const res = await getRedirectResult(FB.auth);
+        if (res?.user) setFb({ ready: true, user: res.user });
+      } catch {}
+
+      // ready flag — heç olmasa init tamamlandı
+      setFb((prev)=> ({ ready: true, user: prev.user }));
       return { auth: FB.auth };
     } catch (e) {
-      setFb({ ready:false, user:null });
-      try { setLastError(String(e?.message || e)); } catch {}
+      setFb({ ready: false, user: null });
+      setLastError(String(e?.message || e));
       throw e;
     }
   }, []);
 
-  useEffect(() => { (async()=>{ try { await ensure(); } catch {} })(); }, [ensure]);
+  useEffect(() => { (async () => { try { await ensure(); } catch {} })(); }, [ensure]);
 
   const signIn = async () => {
     try {
       if (!ref.current?.auth) await ensure();
       const { auth } = ref.current || {};
       const provider = new GoogleAuthProvider();
-      try { await signInWithRedirect(auth, provider); }
-      catch { await signInWithPopup(auth, provider); }
+      // Mobil brauzerlərdə popup çox vaxt bloklanır — redirect üstünlük verək
+      const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithRedirect(auth, provider);
+      } else {
+        try { await signInWithPopup(auth, provider); }
+        catch { await signInWithRedirect(auth, provider); }
+      }
     } catch (err2) {
-      try { setLastError(String(err2?.message || err2)); } catch {}
+      setLastError(String(err2?.message || err2));
       alert('Giriş mümkün olmadı. Authorized domains və env dəyərlərini yoxlayın.');
     }
   };
