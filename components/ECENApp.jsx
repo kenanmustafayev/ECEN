@@ -830,7 +830,7 @@ function Tab({ id, icon, label }) {
     <button
       type="button"
       onClick={(e) => {
-        e.preventDefault(); // form içindədirsə submit olmasın
+        //e.preventDefault(); // form içindədirsə submit olmasın
         setActiveTab(id);
       }}
       className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
