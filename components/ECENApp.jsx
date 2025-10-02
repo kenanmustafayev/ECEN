@@ -833,7 +833,10 @@ function Tab({ id, icon, label }) {
   return (
     <button
       type="button"
-      onClick={() => setActiveTab(id)} // Daha qısa
+      onClick={(e) => { // <-- Hadisə (event) obyektini qəbul edirik
+        e.preventDefault(); // <-- Klikin standart davranışını (məsələn: form submit) ləğv edirik
+        setActiveTab(id);
+      }}
       className={`flex items-center gap-2 px-3 py-2 rounded-xl border shadow-sm ${
         isActive ? "bg-indigo-600 text-white border-indigo-600" : "bg-white hover:bg-gray-50"
       }`}
@@ -844,16 +847,6 @@ function Tab({ id, icon, label }) {
   );
 }
 
-// ... və aşağıda nav hissəsi olduğu kimi qalır:
-// ...
-<nav className="mb-6 flex flex-wrap gap-2">
-  <Tab id="purchases" icon={<Package size={16}/>} label="Alışlar" />
-  <Tab id="sales" icon={<Users size={16}/>} label="Satışlar" />
-  <Tab id="expenses" icon={<Receipt size={16}/>} label="Xərclər" />
-  <Tab id="payments" icon={<DollarSign size={16}/>} label="Ödənişlər" />
-  <Tab id="reports" icon={<PieChart size={16}/>} label="Hesabatlar" />
-</nav>
-// ...
 
 
 
